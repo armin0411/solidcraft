@@ -6,13 +6,13 @@
 //! elbow, for a later leader; it does not draw an arrow or attach anything to a model.
 //!
 //! This is a bounded basic subset, not certification to the complete standards. See
-//! `docs/weld-symbols.md` for evidence, supported combinations and remaining edition/proportion
-//! review. ISO intermittent clear spacing is derived from stored centre pitch, never confused
+//! `docs/weld-symbols.md` for clause references, supported combinations and layout limits.
+//! ISO intermittent clear spacing is derived from stored centre pitch, never confused
 //! with it; unsupported combinations return errors.
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Seg2, Vec2, paper::Item};
+use crate::{Loop2, Region2, Seg2, Vec2, paper::Item};
 
 /// Engineering dimensions accepted by this record, in mm (not drawing scale).
 pub const MIN_DIMENSION_MM: f64 = 1e-6;
@@ -62,14 +62,19 @@ impl Kind {
 pub enum Size {
     Leg(f64),
     Throat(f64),
-    DeepPenetrationThroat(f64),
+    /// ISO deep penetration needs both the total and nominal throat dimensions.
+    DeepPenetrationThroat {
+        total_mm: f64,
+        nominal_mm: f64,
+    },
     ButtPenetration(f64),
 }
 
 impl Size {
     fn value(self) -> f64 {
         match self {
-            Self::Leg(v) | Self::Throat(v) | Self::DeepPenetrationThroat(v) | Self::ButtPenetration(v) => v,
+            Self::Leg(v) | Self::Throat(v) | Self::ButtPenetration(v) => v,
+            Self::DeepPenetrationThroat { total_mm, .. } => total_mm,
         }
     }
 
@@ -77,7 +82,7 @@ impl Size {
         match self {
             Self::Leg(_) => "leg",
             Self::Throat(_) => "throat",
-            Self::DeepPenetrationThroat(_) => "deep penetration throat",
+            Self::DeepPenetrationThroat { .. } => "deep penetration throat",
             Self::ButtPenetration(_) => "butt penetration",
         }
     }
@@ -86,6 +91,8 @@ impl Size {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Contour {
+    /// Straight-face mark: ISO flush; AWS flat for fillets, flush for grooves.
+    /// Does not choose a finishing operation.
     Flush,
     Convex,
     Concave,
@@ -96,8 +103,8 @@ pub enum Contour {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Intermittent {
-    /// Number of elements when specified. Required for this subset's ISO callout; AWS counted
-    /// fillet callouts are not supported. The count does not repeat geometry in this module.
+    /// Number of elements when specified. An omitted ISO count covers the joint length.
+    /// AWS counted fillet callouts are unsupported. This count never repeats geometry here.
     pub count: Option<u16>,
     pub pitch_mm: f64,
 }
@@ -117,10 +124,14 @@ impl WeldSide {
     pub fn validate(&self) -> Result<()> {
         if let Some(size) = self.size {
             dimension(size.value())?;
+            if let Size::DeepPenetrationThroat { total_mm, nominal_mm } = size {
+                dimension(nominal_mm)?;
+                require(total_mm > nominal_mm, "deep penetration throat must exceed nominal throat")?;
+            }
             require(
                 matches!(
                     (self.kind, size),
-                    (Kind::Fillet, Size::Leg(_) | Size::Throat(_) | Size::DeepPenetrationThroat(_))
+                    (Kind::Fillet, Size::Leg(_) | Size::Throat(_) | Size::DeepPenetrationThroat { .. })
                         | (Kind::SquareButt | Kind::SingleVButt, Size::ButtPenetration(_))
                 ),
                 "size meaning does not match weld kind",
@@ -194,6 +205,9 @@ impl Weld {
                 let mut text = format!("{name}: {}", s.kind.name());
                 if let Some(size) = s.size {
                     text.push_str(&format!(", {}={} mm", size.name(), size.value()));
+                    if let Size::DeepPenetrationThroat { nominal_mm, .. } = size {
+                        text.push_str(&format!(", nominal throat={nominal_mm} mm"));
+                    }
                 }
                 if let Some(length) = s.length_mm {
                     text.push_str(&format!(", length={length} mm"));
@@ -206,7 +220,7 @@ impl Weld {
                 }
                 if let Some(c) = s.contour {
                     text.push_str(match c {
-                        Contour::Flush => ", flush",
+                        Contour::Flush => ", flat/flush face",
                         Contour::Convex => ", convex",
                         Contour::Concave => ", concave",
                     });
@@ -243,8 +257,9 @@ pub enum Convention {
     AwsA2_4_2020,
 }
 
-/// Physical sizes on paper, never multiplied by a model/view scale. The proportions used here
-/// are original layout choices pending the review described in docs/weld-symbols.md.
+/// Lettering height and line width on paper, never multiplied by a model/view scale.
+/// AWS geometry uses the SI reference profile scaled with this height; ISO layout choices and
+/// the distinction between mandatory rules and informative guidance are in docs/weld-symbols.md.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Style {
     pub height_mm: f64,
@@ -293,6 +308,9 @@ impl Weld {
         let Style { height_mm: h, width_mm: d } = style;
         require(h.is_finite() && (1.0..=20.0).contains(&h), "paper height must be 1 to 20 mm")?;
         require(d.is_finite() && d >= 0.01 && d <= h / 4.0, "line width must be 0.01 mm to one quarter of height")?;
+        let aws = convention == Convention::AwsA2_4_2020;
+        // AWS SI reference geometry is scaled together; lettering remains caller-measured.
+        let g = if aws { h * (10.0 / 7.0) } else { h };
         let symmetric = self.arrow_side.is_some() && self.arrow_side == self.other_side;
         let dual = matches!(convention, Convention::Iso2553_2019A { .. }) && !symmetric && (self.arrow_side.is_some() || self.other_side.is_some());
         let mut labels = Vec::new();
@@ -310,10 +328,17 @@ impl Weld {
         }
         let left = labels.iter().filter(|t| matches!(t.role, TextRole::Size(_))).map(|t| t.width_mm).fold(0.0, f64::max);
         let right = labels.iter().filter(|t| matches!(t.role, TextRole::Length(_))).map(|t| t.width_mm).fold(0.0, f64::max);
+        let symbol_width = [&self.arrow_side, &self.other_side].into_iter().flatten().map(|s| elementary_size(s.kind, aws, g).0).fold(g, f64::max);
         let x = 3.0 * h + left;
-        let end = x + h + right + 3.0 * h;
+        let end = x + symbol_width + right + 3.0 * h;
         let mut drawing = Drawing { convention, items: Vec::new(), text: Vec::new(), reference_length_mm: end };
-        let round_radius = if self.all_round { 0.3 * h } else { 0.0 };
+        let round_radius = if !self.all_round {
+            0.0
+        } else if aws {
+            0.45 * g
+        } else {
+            0.3 * g
+        };
         stroke(&mut drawing.items, vec![line(round_radius, 0.0, end, 0.0)], false, d);
         let dashed_y = match convention {
             Convention::Iso2553_2019A { identification: IdentificationLine::Below } => -2.0 * h,
@@ -321,11 +346,15 @@ impl Weld {
         };
         if dual {
             // Explicit strokes: the paper scene has no line-pattern primitive yet. The bounded
-            // reference length and minimum height cap this at fewer than 500 dashes.
-            let mut start = 2.0 * h;
-            while start < end - h {
-                stroke(&mut drawing.items, vec![line(start, dashed_y, (start + 3.0 * h).min(end - h), dashed_y)], false, d);
-                start += 4.5 * h;
+            // reference length and minimum height cap this at fewer than 500 dashes. Both
+            // reference lines have the same extent, with a dash at each end.
+            let count = ((end - round_radius) / (4.5 * h)).ceil().max(2.0) as usize;
+            let gap = 1.5 * h;
+            let dash = (end - round_radius - gap * (count - 1) as f64) / count as f64;
+            for i in 0..count {
+                let start = round_radius + i as f64 * (dash + gap);
+                let finish = if i + 1 == count { end } else { start + dash };
+                stroke(&mut drawing.items, vec![line(start, dashed_y, finish, dashed_y)], false, d);
             }
         }
         let position = |side| -> (f64, f64) {
@@ -346,24 +375,33 @@ impl Weld {
             };
             let (y, sign) = position(side);
             label.baseline =
-                Vec2::new(if left_label { x - h - label.width_mm } else { x + 2.0 * h }, y + if sign > 0.0 { 0.25 * h } else { -1.25 * h });
+                Vec2::new(if left_label { x - h - label.width_mm } else { x + symbol_width + h }, y + if sign > 0.0 { 0.25 * h } else { -1.25 * h });
         }
         drawing.text = labels;
         for (side, spec) in [(Side::Arrow, &self.arrow_side), (Side::Other, &self.other_side)] {
             if let Some(s) = spec {
                 let (y, sign) = position(side);
-                elementary(&mut drawing.items, s.kind, x, y, sign * h, d);
+                let (w, height) = elementary_size(s.kind, aws, g);
+                elementary(&mut drawing.items, s.kind, x, y, w, sign * height, d);
                 if let Some(contour) = s.contour {
-                    let (p0, p3, outward) = if s.kind == Kind::Fillet {
-                        (Vec2::new(x + 0.5 * h, y + sign * 1.5 * h), Vec2::new(x + 1.5 * h, y + sign * 0.5 * h), Vec2::new(1.0, sign))
+                    let diagonal = 1.0 / 2.0_f64.sqrt();
+                    let (face, tangent, outward) = if s.kind == Kind::Fillet {
+                        (Vec2::new(x + g / 2.0, y + sign * g / 2.0), Vec2::new(diagonal, -sign * diagonal), Vec2::new(diagonal, sign * diagonal))
                     } else {
-                        (Vec2::new(x, y + sign * 1.6 * h), Vec2::new(x + h, y + sign * 1.6 * h), Vec2::new(0.0, sign))
+                        (Vec2::new(x + w / 2.0, y + sign * height), Vec2::new(1.0, 0.0), Vec2::new(0.0, sign))
                     };
+                    let radius = 1.5 * g;
+                    let offset = radius * 3.0_f64.sqrt() / 2.0;
+                    let middle = face + outward * (0.5 * g + radius - offset);
+                    let p0 = middle - tangent * (0.75 * g);
+                    let p3 = middle + tangent * (0.75 * g);
                     let path = match contour {
                         Contour::Flush => Seg2::Line { a: p0, b: p3 },
                         Contour::Convex | Contour::Concave => {
-                            let bulge = outward * (if contour == Contour::Convex { 1.0 } else { -1.0 } * h * 0.3);
-                            Seg2::Cubic { p0, p1: p0 + (p3 - p0) / 3.0 + bulge, p2: p0 + (p3 - p0) * (2.0 / 3.0) + bulge, p3 }
+                            let bulge = if contour == Contour::Convex { 1.0 } else { -1.0 };
+                            let center = middle - outward * (bulge * offset);
+                            let start = (p0.y - center.y).atan2(p0.x - center.x);
+                            Seg2::Arc { center, radius, start, sweep: -sign * bulge * std::f64::consts::FRAC_PI_3 }
                         }
                     };
                     stroke(&mut drawing.items, vec![path], false, d);
@@ -379,21 +417,22 @@ impl Weld {
             );
         }
         if self.field {
-            stroke(
-                &mut drawing.items,
-                vec![line(0.0, round_radius, 0.0, 2.5 * h), line(0.0, 2.5 * h, h, 2.0 * h), line(h, 2.0 * h, 0.0, 1.5 * h)],
-                false,
-                d,
-            );
+            stroke(&mut drawing.items, vec![line(0.0, round_radius, 0.0, 1.2 * g)], false, d);
+            drawing.items.push(Item::Fill {
+                region: Region2 {
+                    outer: Loop2 { segs: vec![line(0.0, 1.2 * g, 0.0, 0.6 * g), line(0.0, 0.6 * g, g, 0.9 * g), line(g, 0.9 * g, 0.0, 1.2 * g)] },
+                    holes: Vec::new(),
+                },
+            });
         }
         if let Some(tail) = &self.tail {
             let width = measure(tail, h);
             require(width.is_finite() && width > 0.0 && width <= 1000.0, "tail metric must be finite, positive and at most 1000 mm")?;
-            stroke(&mut drawing.items, vec![line(end + h, -h, end, 0.0), line(end, 0.0, end + h, h)], false, d);
+            stroke(&mut drawing.items, vec![line(end + g, -g, end, 0.0), line(end, 0.0, end + g, g)], false, d);
             drawing.text.push(Text {
                 role: TextRole::Tail,
                 text: tail.clone(),
-                baseline: Vec2::new(end + 1.5 * h, -h / 2.0),
+                baseline: Vec2::new(end + 1.5 * g, -h / 2.0),
                 height_mm: h,
                 width_mm: width,
             });
@@ -414,8 +453,8 @@ fn callout(side: &WeldSide, convention: Convention) -> Result<(String, String)> 
             }
         }
         Some(Size::Throat(v)) if !aws => format!("a{v}"),
-        Some(Size::DeepPenetrationThroat(v)) if !aws => format!("s{v}"),
-        Some(Size::ButtPenetration(v)) if !aws => format!("s{v}"),
+        Some(Size::DeepPenetrationThroat { total_mm, nominal_mm }) if !aws => format!("s{total_mm} a{nominal_mm}"),
+        Some(Size::ButtPenetration(v)) if !aws => v.to_string(),
         Some(_) => return Err(Invalid("this size meaning has no supported AWS callout; no automatic conversion")),
     };
     let length = match (side.length_mm, side.intermittent) {
@@ -424,7 +463,7 @@ fn callout(side: &WeldSide, convention: Convention) -> Result<(String, String)> 
         (Some(l), Some(i)) if aws && i.count.is_none() => format!("{l}-{}", i.pitch_mm),
         (Some(_), Some(_)) if aws => return Err(Invalid("counted AWS intermittent fillet callouts are not supported; use the semantic text")),
         (Some(l), Some(Intermittent { count: Some(n), pitch_mm })) => format!("{n}×{l} ({})", pitch_mm - l),
-        (Some(_), Some(_)) => return Err(Invalid("this ISO intermittent callout requires an element count; use the semantic text")),
+        (Some(l), Some(Intermittent { count: None, pitch_mm })) => format!("{l} ({})", pitch_mm - l),
     };
     Ok((size, length))
 }
@@ -437,16 +476,26 @@ fn stroke(items: &mut Vec<Item>, path: Vec<Seg2>, closed: bool, width_mm: f64) {
     items.push(Item::Stroke { path, closed, width_mm });
 }
 
-fn elementary(items: &mut Vec<Item>, kind: Kind, x: f64, y: f64, h: f64, d: f64) {
+fn elementary_size(kind: Kind, aws: bool, g: f64) -> (f64, f64) {
+    match (kind, aws) {
+        (Kind::Fillet, _) => (g, g),
+        (Kind::SquareButt, true) => (0.6 * g, 1.2 * g),
+        (Kind::SquareButt, false) => (0.5 * g, g),
+        (Kind::SingleVButt, true) => (2.0 * g, g),
+        (Kind::SingleVButt, false) => (g, g * 3.0_f64.sqrt() / 2.0),
+    }
+}
+
+fn elementary(items: &mut Vec<Item>, kind: Kind, x: f64, y: f64, w: f64, h: f64, d: f64) {
     match kind {
-        Kind::Fillet => stroke(items, vec![line(x, y, x, y + h), line(x, y + h, x + h.abs(), y)], false, d),
+        // The base belongs to the symbol, including over a gap in ISO A's dashed line.
+        Kind::Fillet => stroke(items, vec![line(x, y, x, y + h), line(x, y + h, x + w, y), line(x + w, y, x, y)], true, d),
         Kind::SquareButt => {
             stroke(items, vec![line(x, y, x, y + h)], false, d);
-            stroke(items, vec![line(x + h.abs(), y, x + h.abs(), y + h)], false, d);
+            stroke(items, vec![line(x + w, y, x + w, y + h)], false, d);
         }
         Kind::SingleVButt => {
-            let top = y + h * 3.0_f64.sqrt() / 2.0;
-            stroke(items, vec![line(x, top, x + h.abs() / 2.0, y), line(x + h.abs() / 2.0, y, x + h.abs(), top)], false, d);
+            stroke(items, vec![line(x, y + h, x + w / 2.0, y), line(x + w / 2.0, y, x + w, y + h)], false, d);
         }
     }
 }

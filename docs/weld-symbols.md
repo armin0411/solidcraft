@@ -1,138 +1,129 @@
 # Welding-symbol records (W30b, #7259)
 
 `solidcraft_geom::weld` provides manual welding requirements, semantic text and original local
-symbol geometry. It needs no weldment, bead, model or active document. This is a foundation
-below the UI, with no commands, sheet placement, leaders, view attachment or saved drawing
-schema yet. It does not implement the model-side weldment work in #4003 or the other symbol
-families in #7257 and #7258.
+symbol geometry. It needs no weldment, bead, model or active document. This foundation stays
+below the UI: no commands, sheet placement, leaders, view attachment or saved drawing schema.
+It does not implement the model-side weldment work in #4003 or symbol families #7257/#7258.
 
 ## Contract
 
 `Weld` has independent optional `arrow_side` and `other_side` records, all-round and field
 marks, and an optional single-line tail. Each `WeldSide` has a kind, an optional typed size,
-nominal length, optional chain-intermittent centre-to-centre pitch and element count, and an optional contour.
-Missing dimensions stay unspecified. The record never derives a throat from a leg, infers a
-welding process or obtains requirements from visible model geometry.
+nominal length, optional intermittent centre-to-centre pitch and element count, and a contour.
+Supported elementary shapes are fillet, square butt and single-V butt.
 
-Supported elementary shapes are fillet, square butt and single-V butt. Fillet sizes explicitly
-distinguish leg, throat and deep-penetration throat; butt penetration is a different size kind.
-Contours distinguish flush, convex and concave. The tail is author-supplied text, including any
-WPS/process/quality references; it is not a validated ISO 4063 or ISO 5817 catalogue. A tail-only
-note supports “details elsewhere” without inventing an elementary weld requirement.
+Fillet sizes distinguish leg, nominal throat and deep-penetration throat. A deep-penetration
+size stores **both** `total_mm` and `nominal_mm`, with total greater than nominal. Butt
+penetration is a different size kind. Values are never converted between size meanings.
+The straight-face contour is `Contour::Flush`: ISO calls it flush, while AWS distinguishes
+flat fillet faces from flush groove faces. Convex and concave faces are separate choices.
+No finishing operation, grinding allowance or surface-roughness requirement is inferred.
 
-Dimensions are finite millimetres in `1e-6..=100000`. Intermittent fillets require a length and
-a pitch exceeding it by at least `1e-6 mm`. An optional count is 2 to 65535; it does not allocate
-or draw repeated welds. This subset supports chain spacing on two sides
-only when their element length, pitch and optional count agree. It rejects all-round intermittent
-notes and intermittent butt welds as unsupported combinations. These limits are implementation limits,
-not universal manufacturing rules. Tails contain nonblank text of at most 512 UTF-8 bytes;
-controls, line separators and bidi overrides/isolates are rejected.
+The tail is author-supplied text, including any WPS/process/quality references; it is not a
+validated ISO 4063 or ISO 5817 catalogue. A tail-only note supports details elsewhere without
+inventing an elementary weld requirement. Missing dimensions are not autofilled. Callers
+must account for standard interpretations of omitted dimensions: for example, a butt symbol
+without a penetration dimension normally specifies full penetration unless other information
+governs it; a missing length normally means the joint length. This record does not resolve
+external notes or WPS references.
 
-Call `validate()` after serde deserialization or an edit. A file/command boundary must also
-bound encoded bytes and nesting before parsing; validation cannot undo parsing allocations.
-Unknown fields and unknown enum variants are refused. Every text/geometry entry point
-validates again, including for records constructed directly in Rust.
+Dimensions are finite mm in `1e-6..=100000`. Intermittent fillets require element length and
+a centre pitch exceeding it by at least `1e-6 mm`. An optional count is 2 to 65535 and never
+allocates repeated geometry. Two-sided chain arrangements require matching length, pitch
+and optional count. Staggered patterns, all-round intermittent notes and intermittent butt
+welds are unsupported. These bounds are implementation limits, not universal manufacturing
+rules. Tails contain nonblank text of at most 512 UTF-8 bytes; controls, line separators and
+bidi overrides/isolates are rejected.
 
-`text()` gives a semantic summary with side names, size meanings, full stored numeric precision
-and units, pitch explicitly named as pitch, contours, marks and quoted tail text. It is not a
-standard callout, machine interchange format, localized UI label or a statement of compliance.
-One-sided elements are described as intermittent; matching elements on both sides are
-described as a chain arrangement.
+Call `validate()` after serde deserialization or editing. Encoded-input boundaries must also
+cap bytes and nesting before parsing; validation cannot undo parsing allocations. Unknown
+fields and variants are refused, including within the paired deep-throat size. Every text
+and geometry entry point validates again, including records constructed directly in Rust.
+
+`text()` gives a semantic summary with sides, size meanings, both deep-throat values, full
+stored numeric precision and units, explicitly named pitch, contours, marks and quoted tail
+text. One-sided elements are intermittent; matching elements on both sides form a chain.
+The summary is not a standards callout, parser format, localized UI label or compliance claim.
 
 ## Drawing and convention choices
 
-`draw(convention, style, measure)` takes an explicit edition/system selection. Changing it
-does not modify the semantic record. No drawing-wide default or silent standard conversion
-is introduced.
+`draw(convention, style, measure)` requires an explicit edition/system. Changing it never
+modifies the semantic record. No drawing-wide default or silent standard conversion is added.
 
 | Convention | Arrow side | Other side | Supported dimension labels |
 |---|---|---|---|
-| `Iso2553_2019A` | Continuous line | Dashed identification line, explicitly above or below | Fillet `z`, `a`, `s`; butt penetration `s`; continuous length or counted intermittent `n×length (gap)` |
-| `Iso2553_2019B` | Below the single line | Above the single line | Same basic ISO labels |
-| `AwsA2_4_2020` | Below the single line | Above the single line | Fillet leg without prefix; continuous length or intermittent `length-pitch` |
+| `Iso2553_2019A` | Continuous line | Dashed identification line, explicitly above or below | Fillet `z` or `a`; paired deep throat `s8 a5`; numeric butt penetration; length or intermittent `n×length (gap)` / `length (gap)` |
+| `Iso2553_2019B` | Below the single line | Above the single line | Same ISO size and spacing meanings |
+| `AwsA2_4_2020` | Below the single line | Above the single line | Fillet leg without prefix; length or uncounted intermittent `length-pitch` |
 
-Identical double-sided ISO A welds omit the identification line and place the elementary
-symbols opposite one another at the continuous line. An ISO A tail-only note also has no
-identification line. For asymmetric welds, side meaning follows line identity even when the
-identification line moves below the continuous line. The fillet's vertical stroke stays left
-on either side; changing sides does not mirror the text or turn the symbol sideways.
+ISO A's two reference lines have equal extents. Identical double-sided welds omit the dashed
+line and put the symbols opposite one another on the continuous line. Tail-only ISO A notes
+also omit the dashed line. Asymmetric side meaning follows line identity even when the dashed
+line moves below. Fillet vertical strokes stay left; text is never mirrored or turned sideways.
 
-The returned `Drawing` contains `paper::Item` strokes and semantic `Text` runs with left-aligned
-baselines, measured widths and cap heights. Coordinates are local paper mm, x right/y up; the
-reference elbow is `(0,0)` and its tail junction is `(reference_length_mm,0)`. No arrow/leader
-is drawn. The all-round circle and field flag are at that elbow; the fork and tail are at the
-opposite end. The later leader implementation must use these junctions. This fragment alone
-is not a complete welding symbol on a sheet.
-When composing a sheet later, declare the selected system and the engineering unit (mm).
-For an all-round note, reference and flag strokes stop at the circle; a future leader must
-also terminate at its boundary instead of running through its hollow interior.
+ISO spacing in parentheses is the **clear gap**, calculated as stored centre pitch minus
+length. For three 50 mm elements at 100 mm centre pitch the label is `3×50 (50)`; without a
+count it is `50 (50)`, applying along the joint length. The AWS label is `50-100`.
+Counted AWS fillet callouts and AWS throat/deep-throat/butt-penetration callouts explicitly
+reject; they are not silently converted. An unsupported rendering still has semantic text.
 
-Use the same font and cap height for `measure(text, height_mm)` and for drawing the returned
-text. The caller must report unsupported glyphs before accepting the output, and escape text
-in its output format. No lettering font, glyph substitution or guessed character-width table
-is bundled here. Measured widths must be finite, positive and at most 1000 mm. Symbol height
-is `1..=20 mm`; stroke width is `0.01..=height/4`. These bounds cap work and coordinates even
-with hostile metrics. Sizes on paper do not change with view scale. Dashes are explicit short
-strokes because the current paper scene has no line-pattern primitive.
+`Drawing` contains `paper::Item` strokes/fills and semantic `Text` runs with measured widths,
+lettering heights and left-aligned baselines. Coordinates are local paper mm, x right/y up.
+The elbow is `(0,0)` and the tail junction is `(reference_length_mm,0)`. No arrow is drawn.
+The all-round circle and filled field flag are at the elbow; the fork and tail are opposite.
+A later leader must use these junctions, terminating at the all-round circle boundary to keep
+its interior hollow. A fragment alone is not a complete welding symbol on a sheet.
+Later sheet composition must declare the system and engineering units (mm).
 
-Geometry is independently constructed from lines, a circular all-round mark and cubic contour
-curves. Fillets use a right triangle; square butt uses two parallel strokes; single-V uses
-two strokes with a 60-degree included **glyph** angle (not a stored preparation angle).
-Fillet contours follow the sloping face; butt contours span the opening. These are original
-parametric constructions, not copied standard figures, CAD artwork or font glyphs. They add
-no file assets or dependencies.
+Use the same font and cap height for `measure(text, height_mm)` and for the returned text.
+The caller must detect unsupported glyphs and escape text in its output format. No lettering
+font, glyph substitution or guessed character-width table is supplied. Widths must be finite,
+positive and at most 1000 mm. Lettering height is `1..=20 mm`, line width `0.01..=height/4`.
+These caps bound work and coordinates even with hostile metrics; view scale never alters them.
+Dashes are explicit strokes with balanced endpoints because paper has no pattern primitive.
 
-## Evidence and limits
+Geometry is constructed independently from lines, circular arcs and a triangular region.
+Fillet outlines are closed independently of gaps in ISO A's dashed identification line.
+At the default 3.5 mm lettering height, the AWS SI reference profile uses a 5×5 mm fillet,
+6 mm square-groove strokes spaced 3 mm apart, and a V 10 mm wide by 5 mm high. Its all-round
+circle is 4.5 mm in diameter, field flag has a 6 mm staff and 5×3 mm triangle, tail arms have
+5 mm horizontal/vertical components, and curved contours have 7.5 mm radius and chord.
+All scale together with lettering height. ISO uses consistent original local ratios, including
+a 60-degree V glyph; AWS's reference V glyph is 90 degrees. Neither stores a preparation angle.
+Contours follow the fillet face or span the butt opening and keep ink clear at maximum width.
+Text clearance and reference length grow from actual metrics instead of fixed character counts.
+No source artwork, fonts, paths, text or file assets are copied or redistributed; no dependency
+is added.
 
-The [issue](https://github.com/tangency-labs/solidcraft/issues/7259), the linked
-[research](https://github.com/tangency-labs/solidcraft/issues/860#issuecomment-6216908058)
-(§§5.4.0, 5.4.2, 11.1, 11.8, 11.9, 11.28, 11.32) and the
-[W30 plan](https://github.com/tangency-labs/solidcraft/issues/860#issuecomment-6234779815)
-define the scope. Public sources checked on 2026-10-26, with vocabulary rechecked on 2026-10-27:
+## Standards references and limits
 
-- [ISO's 2553:2019 corrected-edition overview and vocabulary](https://www.iso.org/obp/ui?_escaped_fragment_=iso:std:iso:2553:ed-5:v2:en)
-  establishes the dual/single-line systems and semantic distinctions. The lawfully public
-  [ISO preview](https://cdn.standards.iteh.ai/samples/72740/745f6baf65c1495fa159e36173dbfd21/ISO-2553-2019.pdf)
-  covers elementary symbols and the symmetric double-sided identification-line exception.
-- [AWS's own explanation of A2.4:2020 clause 6.1](https://www.aws.org/magazines-and-media/inspection-trends/2025/may/it-may-25-feature-02-symbols/)
-  verifies AWS side placement. The publisher's
-  [2020 preview](https://pubs.aws.org/Download_PDFS/2__A2_4_2020_PV.pdf) identifies the edition;
-  its public [2007 chart](https://app.aws.org/mwf/attachments/64/225364/AWSWeldSymbolchart.pdf)
-  supplies the basic `length-pitch`, mark and tail conventions. The publisher's
-  [2007 preview](https://pubs.aws.org/Download_PDFS/A2.4_2007PV.pdf), clause 3.1, distinguishes
-  an elementary weld mark from the complete welding annotation. Continuity with 2020 beyond
-  verified side placement still needs edition-specific drafting review.
-- [TWI's authored welding-symbol explanation](https://www.twi-global.com/technical-knowledge/job-knowledge/weld-symbols)
-  supports the basic size meanings and ISO line identity. It discusses earlier ISO/EN editions;
-  it is not proof of every 2019 clause.
-- The [Australian Welding Institute's authored explanation](https://welding.org.au/standards/as-1101-3/)
-  distinguishes counted element length and clear spacing, and describes the basic marks and
-  contours. Its generic ISO comparison supports `n×length (gap)`; it does not establish all
-  edition-specific ISO 2553 clauses or system B rules.
+The issue and linked drawings research/W30 plan establish this backend scope. The following
+edition-specific rules were reviewed for the supported subset:
 
-These sources establish the basic subset, not complete current-edition conformity. The
-research itself marks several facts and proportions as unverified. Exact edition-specific
-symbol proportions, ISO B placement beyond the research's proposed mapping, and the full
-dimension grammar still need a drafting reviewer and lawful edition-specific evidence.
-The h-based spacing, dash lengths, circle/flag/fork sizes and contour offsets in this module
-are explicitly original layout choices pending that review, not asserted normative ratios.
+- ISO 2553:2019, 4.3 and 4.4/Table 1: systems and elementary shapes; 4.5/Table 3: contours,
+  all-round and field marks; 4.7.1A and 4.7.2.1: reference lines and side placement; 4.8: tail;
+  5.2, 5.4 and 5.5/Table 6: numeric butt sizes and paired deep/nominal fillet throats;
+  5.3.2: clear spacing, optional counts and chain arrangements. Annex C's alternative
+  intermittent methods are not selected automatically by choosing system B.
+- AWS A2.4:2020, 4.1–4.5/Figures 4.1–4.2: basic and supplementary symbols; 6.1: sides;
+  6.9–6.13: field/all-round marks, tail and contours; 6.16: drawing symbols; Clause 8: fillet
+  dimensions. Annex C supplies the SI reference profile used here.
 
-ISO intermittent notation prints clear spacing as `pitch-length`, and requires an explicit
-element count. For example, 3 elements each 50 mm long at 100 mm centre pitch produce
-`3×50 (50)`; the corresponding uncounted AWS length/pitch label is `50-100`. Missing ISO count
-and counted AWS fillet callouts return explicit unsupported errors. Semantic text retains
-the original centre pitch and any count in every case. AWS throat/deep-throat/butt-penetration
-callouts also return an error instead of converting them to a leg or a different groove
-dimension. All output is returned together or an error; no partially drawn or silently
-simplified symbol is returned. The ISO notation still needs edition-specific drafting review.
+AWS Annex C is **informative reference guidance**, not a claim of mandatory fixed dimensions.
+Default AWS geometry follows its reference proportions; explicit height changes preserve
+those ratios. ISO tables establish shapes and orientation without dimensioning this module's
+local height/spacing profile. ISO glyph sizes, identification-line offset/pattern and layout
+clearance remain explicit original choices; no unverified normative ratios are asserted.
+Font qualification, complete sheet composition and application-specific drafting acceptance
+remain caller/reviewer responsibilities. This is not certification to every ISO/AWS clause.
 
-Further work includes alternative intermittent notations/offsets, staggered patterns, additional
-weld kinds, compound/multiple-reference symbols, unequal legs, preparation/root dimensions,
-finish methods and validated process references. These capabilities are not implied by the
-edition identifiers. No standards text, artwork or lettering is redistributed. The issue's
-full standards/proportion requirement remains subject to these explicit evidence gaps.
+Further work includes additional weld kinds, compound/multiple-reference symbols, unequal
+legs, joint-preparation/root dimensions, staggered patterns, finish methods, validated process
+catalogues and alternative intermittent notations. Edition identifiers do not imply those
+features are implemented. Unsupported cases return errors rather than partial drawings.
 
-Tests use analytic coordinates, semantic assertions, supported/rejected grammar, line identity,
-the symmetric ISO A exception, side swapping, dimension boundaries/non-finite values, hostile
-tail text/style/metrics, contour direction, actual-width layout and paper-scene validation.
-They establish this implementation's behavior, not standards certification.
+Tests use analytic coordinates, actual-width layout, semantic assertions, dimension/serde
+boundaries, hostile text/style/metrics, line identity, equal reference extents, symmetric ISO A,
+side swapping, paired throat dimensions, contour direction/ink clearance, field-flag area,
+AWS reference proportions and paper-scene validation. They establish implemented behavior,
+not standards certification.

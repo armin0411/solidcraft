@@ -40,6 +40,20 @@ fn label(d: &Drawing, role: TextRole) -> &Text {
     d.text.iter().find(|t| t.role == role).unwrap()
 }
 
+// Reference carriers are standalone strokes, separate from an elementary symbol's base.
+fn reference_strokes(d: &Drawing) -> Vec<(Vec2, Vec2)> {
+    d.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Stroke { path, .. } => match path.as_slice() {
+                [Seg2::Line { a, b }] if a.y == b.y => Some((*a, *b)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn manual_record_text_retains_every_requirement_and_precision() {
     let mut n = note();
@@ -78,6 +92,126 @@ fn one_sided_intermittent_notes_do_not_claim_a_chain() {
         n.other_side = Some(spec);
         assert!(n.text().unwrap().contains("chain count=3, chain pitch=100 mm"));
     }
+}
+
+#[test]
+fn verified_iso_butt_penetration_is_unprefixed() {
+    for c in [a(IdentificationLine::Above), a(IdentificationLine::Below), Convention::Iso2553_2019B] {
+        for kind in [Kind::SquareButt, Kind::SingleVButt] {
+            let mut n = note();
+            n.arrow_side = Some(WeldSide { kind, size: Some(Size::ButtPenetration(6.25)), ..fillet(5.0) });
+            assert_eq!(label(&draw(&n, c), TextRole::Size(Side::Arrow)).text, "6.25");
+        }
+    }
+}
+
+#[test]
+fn verified_iso_intermittent_count_is_optional() {
+    let mut n = note();
+    n.arrow_side.as_mut().unwrap().intermittent = Some(Intermittent { count: None, pitch_mm: 100.0 });
+    for c in [a(IdentificationLine::Above), a(IdentificationLine::Below), Convention::Iso2553_2019B] {
+        assert_eq!(label(&draw(&n, c), TextRole::Length(Side::Arrow)).text, "50 (50)");
+    }
+}
+
+#[test]
+fn verified_iso_identification_has_equal_reference_extent() {
+    for pos in [IdentificationLine::Above, IdentificationLine::Below] {
+        let d = draw(&note(), a(pos));
+        let y = if pos == IdentificationLine::Above { 7.0 } else { -7.0 };
+        let dashes: Vec<_> = reference_strokes(&d).into_iter().filter(|(a, b)| a.y == y && b.y == y).collect();
+        assert_eq!(dashes.first().unwrap().0.x, 0.0);
+        assert_eq!(dashes.last().unwrap().1.x, d.reference_length_mm);
+    }
+}
+
+#[test]
+fn fillet_on_identification_line_keeps_a_complete_base() {
+    let mut n = note();
+    n.other_side = n.arrow_side.take();
+    n.other_side.as_mut().unwrap().size = Some(Size::Leg(5.125));
+    let h = Style::default().height_mm;
+    for pos in [IdentificationLine::Above, IdentificationLine::Below] {
+        let d = draw(&n, a(pos));
+        let y = if pos == IdentificationLine::Above { 2.0 * h } else { -2.0 * h };
+        let size = label(&d, TextRole::Size(Side::Other));
+        let x = size.baseline.x + size.width_mm + h;
+        let mut spans: Vec<_> = lines(&d).into_iter().filter(|(a, b)| a.y == y && b.y == y).map(|(a, b)| (a.x.min(b.x), a.x.max(b.x))).collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut covered = x;
+        for (start, end) in spans {
+            if start > covered + 1e-9 {
+                break;
+            }
+            covered = covered.max(end);
+        }
+        assert!(covered >= x + h - 1e-9, "fillet base ends at {covered}, needs {}", x + h);
+    }
+}
+
+#[test]
+fn verified_iso_deep_throat_needs_nominal_dimension() {
+    assert!(serde_json::from_str::<Size>(r#"{"kind":"deep_penetration_throat","mm":8}"#).is_err());
+    let mut n = note();
+    n.arrow_side.as_mut().unwrap().size = Some(Size::DeepPenetrationThroat { total_mm: 8.0, nominal_mm: 5.0 });
+    assert!(n.text().unwrap().contains("deep penetration throat=8 mm, nominal throat=5 mm"));
+    for c in [a(IdentificationLine::Above), a(IdentificationLine::Below), Convention::Iso2553_2019B] {
+        assert_eq!(label(&draw(&n, c), TextRole::Size(Side::Arrow)).text, "s8 a5");
+    }
+    let json = serde_json::to_string(&n).unwrap();
+    assert_eq!(serde_json::from_str::<Weld>(&json).unwrap(), n);
+    for nominal_mm in [f64::NAN, f64::INFINITY, 0.0, -1.0, 8.0, 9.0] {
+        n.arrow_side.as_mut().unwrap().size = Some(Size::DeepPenetrationThroat { total_mm: 8.0, nominal_mm });
+        assert!(n.validate().is_err());
+        assert!(n.text().is_err());
+        assert!(n.draw(Convention::Iso2553_2019B, Style::default(), metric).is_err());
+    }
+    for total_mm in [f64::NAN, f64::INFINITY, 0.0, -1.0, 4.0, MAX_DIMENSION_MM + 1.0] {
+        n.arrow_side.as_mut().unwrap().size = Some(Size::DeepPenetrationThroat { total_mm, nominal_mm: 5.0 });
+        assert!(n.validate().is_err());
+    }
+    n.arrow_side.as_mut().unwrap().size = Some(Size::DeepPenetrationThroat { total_mm: MAX_DIMENSION_MM, nominal_mm: MIN_DIMENSION_MM });
+    n.validate().unwrap();
+    let mut extra = serde_json::to_value(Size::DeepPenetrationThroat { total_mm: 8.0, nominal_mm: 5.0 }).unwrap();
+    extra["mm"]["surprise"] = true.into();
+    assert!(serde_json::from_value::<Size>(extra).is_err());
+}
+
+#[test]
+fn verified_aws_reference_proportions_are_not_iso_proportions() {
+    for (kind, width, height) in [(Kind::Fillet, 5.0, 5.0), (Kind::SquareButt, 3.0, 6.0), (Kind::SingleVButt, 10.0, 5.0)] {
+        let n = Weld {
+            arrow_side: Some(WeldSide { kind, size: None, length_mm: None, intermittent: None, contour: None }),
+            other_side: None,
+            all_round: false,
+            field: false,
+            tail: None,
+        };
+        let d = draw(&n, Convention::AwsA2_4_2020);
+        let pieces: Vec<_> = lines(&d).into_iter().filter(|(a, b)| a.y != 0.0 || b.y != 0.0).collect();
+        let min_x = pieces.iter().flat_map(|(a, b)| [a.x, b.x]).fold(f64::INFINITY, f64::min);
+        let max_x = pieces.iter().flat_map(|(a, b)| [a.x, b.x]).fold(f64::NEG_INFINITY, f64::max);
+        let min_y = pieces.iter().flat_map(|(a, b)| [a.y, b.y]).fold(0.0, f64::min);
+        assert!((max_x - min_x - width).abs() < 1e-10);
+        assert!((min_y + height).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn verified_field_flag_is_a_solid_region() {
+    let mut n = note();
+    n.field = true;
+    n.all_round = true;
+    let d = draw(&n, Convention::AwsA2_4_2020);
+    let area = d
+        .items
+        .iter()
+        .find_map(|i| match i {
+            Item::Fill { region } => Some(region.area()),
+            _ => None,
+        })
+        .unwrap();
+    assert!((area - 7.5).abs() < 1e-10);
 }
 
 #[test]
@@ -133,7 +267,7 @@ fn hostile_dimensions_are_rejected_by_validation_text_and_drawing() {
 #[test]
 fn invalid_size_kind_combinations_fail_and_supported_ones_survive() {
     for kind in [Kind::Fillet, Kind::SquareButt, Kind::SingleVButt] {
-        for size in [Size::Leg(5.0), Size::Throat(5.0), Size::DeepPenetrationThroat(5.0), Size::ButtPenetration(5.0)] {
+        for size in [Size::Leg(5.0), Size::Throat(5.0), Size::DeepPenetrationThroat { total_mm: 8.0, nominal_mm: 5.0 }, Size::ButtPenetration(5.0)] {
             let s = WeldSide { kind, size: Some(size), ..fillet(5.0) };
             let should_pass = (kind == Kind::Fillet) != matches!(size, Size::ButtPenetration(_));
             assert_eq!(s.validate().is_ok(), should_pass);
@@ -159,7 +293,7 @@ fn pitch_is_centre_spacing_and_must_leave_a_real_gap() {
     n.arrow_side.as_mut().unwrap().intermittent = Some(Intermittent { count: None, pitch_mm: 100.0 });
     assert!(n.validate().is_ok());
     assert_eq!(label(&draw(&n, Convention::AwsA2_4_2020), TextRole::Length(Side::Arrow)).text, "50-100");
-    assert!(n.draw(Convention::Iso2553_2019B, Style::default(), metric).is_err());
+    assert_eq!(label(&draw(&n, Convention::Iso2553_2019B), TextRole::Length(Side::Arrow)).text, "50 (50)");
     n.arrow_side.as_mut().unwrap().intermittent.as_mut().unwrap().count = Some(3);
     assert_eq!(label(&draw(&n, Convention::Iso2553_2019B), TextRole::Length(Side::Arrow)).text, "3×50 (50)");
     assert!(n.text().unwrap().contains("intermittent count=3, intermittent pitch=100 mm"));
@@ -236,7 +370,7 @@ fn iso_a_side_meaning_follows_line_identity_in_both_positions() {
         assert_eq!(other.text, "z7");
         assert!(sign * arrow.baseline.y < 0.0);
         assert!(sign * other.baseline.y > 2.0 * h);
-        assert!(lines(drawing).iter().any(|(a, b)| a.y == sign * 2.0 * h && b.y == a.y));
+        assert!(reference_strokes(drawing).iter().any(|(a, b)| a.y == sign * 2.0 * h && b.y == a.y));
     }
     assert_eq!(n.arrow_side.unwrap().size, Some(Size::Leg(5.0)));
 }
@@ -249,7 +383,7 @@ fn iso_b_and_aws_arrow_side_is_below_and_swapping_moves_content() {
         let first = draw(&n, c);
         assert!(label(&first, TextRole::Size(Side::Arrow)).baseline.y < 0.0);
         assert!(label(&first, TextRole::Size(Side::Other)).baseline.y > 0.0);
-        assert_eq!(lines(&first).iter().filter(|(a, b)| a.y == b.y).count(), 1);
+        assert_eq!(reference_strokes(&first).len(), 1);
         let mut swapped = n.clone();
         std::mem::swap(&mut swapped.arrow_side, &mut swapped.other_side);
         let second = draw(&swapped, c);
@@ -265,17 +399,18 @@ fn symmetric_iso_a_omits_identification_only_when_all_side_data_matches() {
     assert_eq!(draw(&n, a(IdentificationLine::Above)).items, draw(&n, a(IdentificationLine::Below)).items);
     for pos in [IdentificationLine::Above, IdentificationLine::Below] {
         let d = draw(&n, a(pos));
-        assert_eq!(lines(&d).iter().filter(|(a, b)| a.y == b.y).count(), 1);
+        assert_eq!(reference_strokes(&d).len(), 1);
         assert!(label(&d, TextRole::Size(Side::Arrow)).baseline.y < 0.0);
         assert!(label(&d, TextRole::Size(Side::Other)).baseline.y > 0.0);
     }
     n.other_side.as_mut().unwrap().contour = Some(Contour::Convex);
-    assert!(lines(&draw(&n, a(IdentificationLine::Above))).iter().filter(|(a, b)| a.y == b.y).count() > 1);
+    assert!(reference_strokes(&draw(&n, a(IdentificationLine::Above))).len() > 1);
 }
 
 #[test]
 fn size_prefixes_are_not_silently_converted_to_aws_legs() {
-    for (size, text) in [(Size::Leg(5.0), "z5"), (Size::Throat(5.0), "a5"), (Size::DeepPenetrationThroat(5.0), "s5")] {
+    for (size, text) in [(Size::Leg(5.0), "z5"), (Size::Throat(5.0), "a5"), (Size::DeepPenetrationThroat { total_mm: 8.0, nominal_mm: 5.0 }, "s8 a5")]
+    {
         let mut n = note();
         n.arrow_side.as_mut().unwrap().size = Some(size);
         let before = n.clone();
@@ -286,7 +421,7 @@ fn size_prefixes_are_not_silently_converted_to_aws_legs() {
     let mut n = note();
     n.arrow_side.as_mut().unwrap().kind = Kind::SingleVButt;
     n.arrow_side.as_mut().unwrap().size = Some(Size::ButtPenetration(5.0));
-    assert_eq!(label(&draw(&n, Convention::Iso2553_2019B), TextRole::Size(Side::Arrow)).text, "s5");
+    assert_eq!(label(&draw(&n, Convention::Iso2553_2019B), TextRole::Size(Side::Arrow)).text, "5");
     assert!(n.draw(Convention::AwsA2_4_2020, Style::default(), metric).is_err());
 }
 
@@ -294,14 +429,21 @@ fn size_prefixes_are_not_silently_converted_to_aws_legs() {
 fn elementary_shapes_have_analytic_coordinates_and_keep_the_vertical_leg_left() {
     let h = 3.5;
     let mut items = Vec::new();
-    elementary(&mut items, Kind::Fillet, 10.0, 0.0, -h, 0.35);
-    assert_eq!(items, vec![Item::Stroke { path: vec![line(10.0, 0.0, 10.0, -3.5), line(10.0, -3.5, 13.5, 0.0)], closed: false, width_mm: 0.35 }]);
+    elementary(&mut items, Kind::Fillet, 10.0, 0.0, h, -h, 0.35);
+    assert_eq!(
+        items,
+        vec![Item::Stroke {
+            path: vec![line(10.0, 0.0, 10.0, -3.5), line(10.0, -3.5, 13.5, 0.0), line(13.5, 0.0, 10.0, 0.0)],
+            closed: true,
+            width_mm: 0.35
+        }]
+    );
     items.clear();
-    elementary(&mut items, Kind::SingleVButt, 10.0, 0.0, h, 0.35);
     let top = h * 3.0_f64.sqrt() / 2.0;
+    elementary(&mut items, Kind::SingleVButt, 10.0, 0.0, h, top, 0.35);
     assert_eq!(items, vec![Item::Stroke { path: vec![line(10.0, top, 11.75, 0.0), line(11.75, 0.0, 13.5, top)], closed: false, width_mm: 0.35 }]);
     items.clear();
-    elementary(&mut items, Kind::SquareButt, 10.0, 0.0, h, 0.35);
+    elementary(&mut items, Kind::SquareButt, 10.0, 0.0, h / 2.0, h, 0.35);
     assert_eq!(items.len(), 2);
     for i in items {
         let Item::Stroke { path, .. } = i else { panic!() };
@@ -317,12 +459,11 @@ fn round_field_and_tail_marks_are_at_reference_endpoints() {
     n.field = true;
     n.tail = Some("WPS-12".into());
     let d = draw(&n, Convention::AwsA2_4_2020);
-    let h = Style::default().height_mm;
-    assert!(d.items.iter().any(|i| matches!(i, Item::Stroke { path, closed: true, .. } if matches!(path.as_slice(), [Seg2::Arc {center,radius,..}] if *center == Vec2::ZERO && *radius == 0.3*h))));
-    assert!(lines(&d).contains(&(Vec2::new(0.0, 0.3 * h), Vec2::new(0.0, 2.5 * h))));
-    assert!(lines(&d).contains(&(Vec2::new(0.3 * h, 0.0), Vec2::new(d.reference_length_mm, 0.0))));
-    assert!(lines(&d).iter().any(|(a, b)| *a == Vec2::new(d.reference_length_mm, 0.0) && *b == Vec2::new(d.reference_length_mm + h, h)));
-    assert!(label(&d, TextRole::Tail).baseline.x > d.reference_length_mm + h);
+    assert!(d.items.iter().any(|i| matches!(i, Item::Stroke { path, closed: true, .. } if matches!(path.as_slice(), [Seg2::Arc {center,radius,..}] if *center == Vec2::ZERO && *radius == 2.25))));
+    assert!(lines(&d).contains(&(Vec2::new(0.0, 2.25), Vec2::new(0.0, 6.0))));
+    assert!(lines(&d).contains(&(Vec2::new(2.25, 0.0), Vec2::new(d.reference_length_mm, 0.0))));
+    assert!(lines(&d).iter().any(|(a, b)| *a == Vec2::new(d.reference_length_mm, 0.0) && *b == Vec2::new(d.reference_length_mm + 5.0, 5.0)));
+    assert!(label(&d, TextRole::Tail).baseline.x > d.reference_length_mm + 5.0);
 }
 
 #[test]
@@ -339,15 +480,16 @@ fn contours_bulge_outward_or_inward_on_each_side() {
                 Item::Stroke { path, .. } => path.as_slice(),
                 _ => &[],
             })
-            .filter_map(|p| match p {
-                Seg2::Cubic { p0, p1, p3, .. } => Some((p0, p1, p3)),
-                _ => None,
-            })
+            .filter(|p| matches!(p, Seg2::Arc { .. }))
             .collect();
         assert_eq!(curves.len(), 2);
-        for (start, control, end) in curves {
-            let chord_control = *start + (*end - *start) / 3.0;
-            assert_eq!(start.y.signum() * (control.y - chord_control.y) > 0.0, contour == Contour::Convex);
+        for curve in curves {
+            let Seg2::Arc { center, radius, start, sweep } = curve else { panic!() };
+            assert!((*radius - 7.5).abs() < 1e-10);
+            let angle = start + sweep / 2.0;
+            let middle = *center + Vec2::new(angle.cos(), angle.sin()) * *radius;
+            let chord_middle = (curve.start() + curve.end()) / 2.0;
+            assert_eq!(chord_middle.y.signum() * (middle.y - chord_middle.y) > 0.0, contour == Contour::Convex);
         }
     }
 }
@@ -362,14 +504,15 @@ fn concave_fillet_keeps_ink_clear_at_the_widest_stroke() {
         .items
         .iter()
         .find_map(|i| match i {
-            Item::Stroke { path, .. } => path.iter().find(|s| matches!(s, Seg2::Cubic { .. })),
+            Item::Stroke { path, .. } => path.iter().find(|s| matches!(s, Seg2::Arc { .. })),
             _ => None,
         })
         .unwrap();
-    let Seg2::Cubic { p0, p1, p2, p3 } = curve else { panic!() };
-    let midpoint = *p0 * 0.125 + *p1 * 0.375 + *p2 * 0.375 + *p3 * 0.125;
+    let Seg2::Arc { center, radius, start, sweep } = curve else { panic!() };
+    let angle = start + sweep / 2.0;
+    let midpoint = *center + Vec2::new(angle.cos(), angle.sin()) * *radius;
     // Normal distance to the fillet's diagonal must exceed the sum of the two half widths.
-    assert!((midpoint.x - x + midpoint.y.abs() - 1.0) / 2.0_f64.sqrt() > 0.25);
+    assert!((midpoint.x - x + midpoint.y.abs() - 10.0 / 7.0) / 2.0_f64.sqrt() > 0.25);
 }
 
 #[test]
@@ -420,7 +563,10 @@ fn actual_text_metrics_reserve_space_without_touching_the_symbol_or_tail() {
     assert!(d.items.len() < 500);
     let d = n.draw(a(IdentificationLine::Above), Style { height_mm: 1.0, width_mm: 0.1 }, |_, _| 1000.0).unwrap();
     assert!(d.items.len() < 500);
-    assert!(lines(&d).iter().filter(|(a, b)| a.y == 2.0 && b.y == 2.0).all(|(a, _)| a.x >= 2.0));
+    let dashes: Vec<_> = reference_strokes(&d).into_iter().filter(|(a, b)| a.y == 2.0 && b.y == 2.0).collect();
+    assert_eq!(dashes.first().unwrap().0.x, 0.0);
+    assert_eq!(dashes.last().unwrap().1.x, d.reference_length_mm);
+    assert!(dashes.windows(2).all(|p| p[1].0.x - p[0].1.x > 1.0));
 }
 
 #[test]
