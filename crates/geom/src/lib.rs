@@ -31,6 +31,7 @@ mod profile;
 pub mod section;
 pub mod simplify;
 pub mod spline_space;
+pub mod surface_texture;
 pub mod tess;
 pub mod tspline;
 mod unit_vec3;
