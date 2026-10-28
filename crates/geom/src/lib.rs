@@ -21,6 +21,7 @@ pub mod drawing_sheet;
 pub mod env;
 pub mod fill;
 pub mod fill_general;
+pub mod gdt;
 mod grid;
 mod mesh;
 pub mod mesh_distance;
