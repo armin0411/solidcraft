@@ -485,3 +485,44 @@ fn maximum_records_remain_small_and_all_ink_is_within_the_declared_margin() {
     }
     assert_paper(layout);
 }
+
+#[test]
+fn provisional_characteristics_do_not_cross_the_frame_ink() {
+    // Calibration must preserve containment, without blessing any guessed proportions.
+    for standard in [Standard::Iso1101_2017Iso5459_2024, Standard::AsmeY14_5_2018] {
+        for h in [1.8_f64, 3.5, 20.0] {
+            for characteristic in Characteristic::ALL {
+                let mut frame = valid_characteristic(characteristic);
+                frame.standard = standard;
+                if frame.validate().is_err() {
+                    continue; // Concentricity/symmetry are not in the supported ASME edition.
+                }
+                let layout = frame.layout(Style { text_height_mm: h }).unwrap();
+                let mut checked = 0;
+                for item in &layout.items {
+                    if let Item::Stroke { path, .. } = item
+                        && matches!(path.as_slice(), [Seg2::Line { a, b }]
+                            if *a == Vec2::new(2.0 * h, 0.0) && *b == Vec2::new(2.0 * h, 2.0 * h))
+                    {
+                        break; // End of the characteristic, before the first divider.
+                    }
+                    let (path, allowance) = match item {
+                        Item::Stroke { path, width_mm, .. } => (path.as_slice(), 2.0 * width_mm),
+                        Item::Fill { region } => (region.outer.segs.as_slice(), 0.0),
+                    };
+                    // A stroke's worst miter reach plus the frame's half-width.
+                    let margin = allowance + h / 20.0;
+                    let inside = crate::Aabb2 { min: Vec2::new(margin, margin), max: Vec2::new(2.0 * h - margin, 2.0 * h - margin) }.inflated(1e-9);
+                    for seg in path {
+                        for step in 0..=32 {
+                            assert!(inside.contains(seg.point_at(f64::from(step) / 32.0)), "{standard:?}/{characteristic:?}, h={h}");
+                        }
+                    }
+                    checked += 1;
+                }
+                assert!(checked > 0);
+                assert_paper(layout);
+            }
+        }
+    }
+}

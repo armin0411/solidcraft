@@ -1,5 +1,13 @@
 # GD&T records and original symbols (W28a, #7257)
 
+> **Provisional drafting geometry — standards compliance outstanding.** Missing
+> construction details use educated original approximations. Characteristic shapes,
+> circled modifiers, lettering, ASME diameter and ASME frame/label conventions must
+> be checked and changed where necessary against the applicable current standards
+> before this output is described as compliant or used as compliant manufacturing
+> annotation. Passing tests establishes the supported behavior and geometry
+> invariants, not normative conformity.
+
 `solidcraft_geom::gdt` supplies single-row feature-control frames and boxed datum
 identifiers as data, text transcriptions and local vector geometry. It depends
 only on the existing geometry, serde and error types, with no UI, operating-system
@@ -83,8 +91,9 @@ and the lettering's worst permitted miter extension, so the clearance applies to
 visible ink rather than centre lines.
 A single-letter datum label is square. Bounds describe stroke centre lines;
 painted ink extends h/20 outside the outer frame. The public [SIST preview of ISO 7083:2021](https://preview.sist.si/sist-preview/66740/2848daeb646f4ca9b325c29dd16e96b1/ISO-7083-2021.pdf),
-Table 2 and clause 5, independently confirms the Type B frame/lettering/line-width
-ratios, square first compartment and horizontal clearance used here. The custom
+Table 2 and clause 5, independently confirms the Type B frame/nominal-height/line-width
+ratios, square first compartment and horizontal clearance used here. This does not
+verify the painted height or construction of the original alphabet. The custom
 1.8 mm height is a supported layout policy, outside that table's recommended sizes.
 
 For the ISO diameter prefix, Table 6 no. 32 supplies the construction grid. With
@@ -97,13 +106,55 @@ separate and provisional pending review, rather than inheriting ISO proportions.
 At h=3.5 mm, the example `⌀0.1Ⓜ` compartment is 17.5 mm wide under ISO and 18.2 mm
 in the ASME preview; the five-cell ISO example is 40.25 × 7 mm.
 
-**The characteristic and circled-modifier outlines in ISO 1101 Annex F / ISO 7083
-and the ISO 5459:2024 datum feature indicator have not been independently
-verified.** The original stroke alphabet is also not a verified ISO 3098 alphabet.
-The preview stops before their construction tables. The study also
-identifies the 2024 datum feature indicator as changed. The local boxed label avoids inventing that deferred indicator.
-Drafting review against the licensed current standards is still required before
-claiming normative graphical conformance or manufacturing completeness.
+## Provisional proportions and replacement points
+
+Unverified details are intentional temporary approximations, not completed
+standards work. They retain recognizable characteristic forms, consistent stroke
+weight and bounded geometry. They are original code; no FreeCAD or commercial CAD
+source, glyph or artwork is used as a construction reference.
+
+| Detail requiring review/correction | Source adjustment point | Evidence still needed |
+| --- | --- | --- |
+| All fourteen characteristic constructions (twelve under ASME) | `crates/geom/src/gdt/geometry/provisional.rs`, `Pen::characteristic`, one named match arm per characteristic | Current ISO 7083 characteristic grids; ASME Y14.5 construction requirements |
+| Circled M/L/P dimensions and placement | Same module, `MODIFIER_*` constants | Family-specific circle, internal-letter and spacing proportions |
+| ASME diameter prefix | Same module, `ASME_DIAMETER_*` constants | ASME Y14.5/Y14.2 construction requirements |
+| Original alphabet, decimal mark, widths and inter-character advance | Same module, `Pen::letter`, `LETTER_WIDTH_H`, `DECIMAL_WIDTH_H`, `CHARACTER_GAP_H` | ISO 3098 lettering construction/spacing and ASME Y14.2 requirements |
+| ASME frame/boxed-label proportions; current ISO boxed-label conventions | `crates/geom/src/gdt/geometry.rs`, `frame`, `datum`, `inset`, `Pen::stroke` | ASME Y14.5/Y14.2 technical pages; ISO 5459:2024 identifier and Annex F dimensions |
+
+All construction coordinates and metrics in the provisional module are normalized
+to h. Change coordinates and their width/advance metrics together. Characteristic
+and lettering guesses currently share a construction between the families; branch
+on `self.standard` there when verified ISO and ASME rules differ. No persisted
+record, semantic validation, paper schema or UI change is needed to replace these
+proportions. Keep unsupported semantic combinations rejected rather than guessing
+new grammar.
+
+`geometry.rs` keeps the independently checked ISO diameter grid separate; do not
+replace it with the ASME approximation. Its frame ratios and clearance have the
+public ISO 7083 evidence described above, while reuse for ASME remains provisional.
+The current ISO 5459 datum indicator's connecting line and triangle remain deferred;
+the boxed label alone is not a complete datum feature indicator.
+
+Available ISO 3098 references do not make the original alphabet compliant. In
+particular, the current alphabet uses h as its centre-line height and a 0.2h
+centre-line gap. ISO 3098-1 distinguishes painted height/spacing from centre-line
+height/spacing (h1=h-d, a1=a+d). Alphabet geometry and advances therefore need
+correction or verification together; the current preview must not be presented as
+verified Type B lettering. The 1.8 mm height is included in ISO 3098-1's Type B size
+table, despite being outside the ISO 7083 preview's recommended height list.
+ISO 1101:2017 Annex F concerns additional indicators, not a complete construction
+grid for the basic fourteen characteristics.
+
+ISO 2692:2021 Annex D supports material requirements on derived linear features of
+size, including coaxiality/symmetry cases beyond this implementation's conservative
+subset. Existing restrictions deliberately remain narrower; actual datum/feature
+eligibility, material evaluation and degrees of freedom need model context.
+
+After replacing provisional details, rerun geometry/clearance/scaling and hostile
+input tests, inspect output from actual Rust primitives, and run the required full
+CI. A green test suite by itself cannot certify the new proportions. Drafting
+review remains outstanding before claiming graphical standards conformity or
+manufacturing completeness.
 
 ## Evidence and boundaries
 

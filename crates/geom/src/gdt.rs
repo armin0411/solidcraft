@@ -5,6 +5,8 @@
 //! only a future drawing checker can resolve. Text and geometry entry points validate again,
 //! including records obtained through serde. Encoded-input callers must also bound input bytes.
 //!
+//! Geometry includes explicitly provisional proportions, isolated for later standards correction.
+//! It must not be treated as standards-compliant manufacturing annotation.
 //! The supported editions, rules, original symbol construction and evidence limits are recorded
 //! in `docs/drawing-gdt.md`. No sheet placement, leaders, targets or composite frames live here.
 
