@@ -45,6 +45,36 @@ pub enum Lay {
     Particulate,
 }
 
+impl IsoParameter {
+    /// Stable printed parameter name, independent of Rust's debug representation.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ra => "Ra",
+            Self::Rz => "Rz",
+            Self::Rp => "Rp",
+            Self::Rv => "Rv",
+            Self::Rq => "Rq",
+            Self::Rmax => "Rmax",
+            Self::Rt => "Rt",
+            Self::Pt => "Pt",
+        }
+    }
+}
+
+impl AsmeParameter {
+    /// Stable printed parameter name, independent of Rust's debug representation.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ra => "Ra",
+            Self::Rq => "Rq",
+            Self::Rz => "Rz",
+            Self::Rt => "Rt",
+            Self::Rp => "Rp",
+            Self::Rv => "Rv",
+        }
+    }
+}
+
 impl Lay {
     pub fn text(self) -> &'static str {
         match self {
@@ -175,7 +205,7 @@ impl Indication {
             // Reject controls, format controls/bidi overrides and non-ASCII whitespace; never trim
             // or normalize the user's process into a different instruction.
             require(
-                process.trim() == process && process.chars().all(plain_char),
+                process.trim() == process && crate::plain_text::is_plain_line(process),
                 "process must be plain single-line text without controls or surrounding whitespace",
             )?;
         }
@@ -209,11 +239,32 @@ impl Indication {
         Ok(())
     }
 
-    /// Ordered, standard-specific parameter lines; ISO ordering controls default settings.
-    /// These are display fragments; the complete diagnostic description is [`Self::text`].
+    /// Ordered, lossless diagnostic fragments, independent of drawing formatting.
     pub fn parameter_texts(&self) -> Result<Vec<String>> {
+        self.parameter_texts_with(&|n| Ok((n.to_string(), n)), false)
+    }
+
+    /// Format the ordered fragments for a drawing before measuring and placing them.
+    /// The caller returns the drawing formatter's text and rounded value in the stored
+    /// amplitude unit. Positive limits rounded to zero and unbounded text are rejected.
+    pub fn formatted_parameter_texts(&self, format_number: impl Fn(f64) -> Result<(String, f64)>) -> Result<Vec<String>> {
+        self.parameter_texts_with(&format_number, true)
+    }
+
+    fn parameter_texts_with(&self, format_number: &impl Fn(f64) -> Result<(String, f64)>, for_preview: bool) -> Result<Vec<String>> {
         self.validate()?;
-        Ok(match &self.specification {
+        let number = |n| {
+            let (text, rounded) = format_number(n)?;
+            if for_preview {
+                require(rounded.is_finite() && rounded > 0.0, "formatted positive limit must not round to zero")?;
+                require(
+                    !text.is_empty() && text.len() <= 128 && text.split('\u{202f}').all(crate::plain_text::is_plain_line),
+                    "formatted limit must be bounded single-line text",
+                )?;
+            }
+            Ok(text)
+        };
+        match &self.specification {
             Specification::Iso21920_1_2021 { lines } => lines
                 .iter()
                 .map(|line| {
@@ -223,17 +274,20 @@ impl Indication {
                         AcceptanceRule::SixteenPercent => " T16%",
                         AcceptanceRule::Median => " Tmed",
                     };
-                    format!("{tolerance}{:?} {}{rule}", line.parameter, line.limit_um)
+                    Ok(format!("{tolerance}{} {}{rule}", line.parameter.name(), number(line.limit_um)?))
                 })
                 .collect(),
             Specification::AsmeY14_36_2018 { lines, .. } => lines
                 .iter()
-                .map(|line| match line.minimum {
-                    Some(minimum) => format!("{:?} {minimum}-{}", line.parameter, line.maximum),
-                    None => format!("{:?} {}", line.parameter, line.maximum),
+                .map(|line| {
+                    let maximum = number(line.maximum)?;
+                    match line.minimum {
+                        Some(minimum) => Ok(format!("{} {}-{maximum}", line.parameter.name(), number(minimum)?)),
+                        None => Ok(format!("{} {maximum}", line.parameter.name())),
+                    }
                 })
                 .collect(),
-        })
+        }
     }
 
     /// Explicit description with standard, units, removal, ordered parameters, lay and process.
@@ -264,12 +318,6 @@ impl Indication {
     }
 }
 
-fn plain_char(c: char) -> bool {
-    !c.is_control()
-        && (!c.is_whitespace() || c == ' ')
-        && !matches!(c, '\u{00ad}' | '\u{0600}'..='\u{0605}' | '\u{061c}' | '\u{06dd}' | '\u{070f}' | '\u{0890}'..='\u{0891}' | '\u{08e2}' | '\u{180e}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}' | '\u{fff9}'..='\u{fffb}' | '\u{110bd}' | '\u{110cd}' | '\u{13430}'..='\u{1343f}' | '\u{1bca0}'..='\u{1bca3}' | '\u{1d173}'..='\u{1d17a}' | '\u{e0000}'..='\u{e007f}')
-}
-
 /// Text is returned separately because `paper::Item` has no text primitive or font metrics yet.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextRun {
@@ -297,8 +345,16 @@ impl Indication {
     /// ISO accepts only nominal text heights 2.5, 3.5, 5, 7, 10, 14 and 20 mm; ASME accepts
     /// finite heights in 2.5..=20 mm. Both retain unchecked preview proportions, documented
     /// in `docs/surface-texture.md`. ISO's distinguishing bar is not the removal crossbar.
-    pub fn preview_geometry(&self, height_mm: f64, reference_width_mm: f64) -> Result<SymbolGeometry> {
-        let texts = self.parameter_texts()?;
+    /// `format_number` uses the drawing's number policy and returns its text and rounded
+    /// value in the same amplitude unit. Errors and positive values rounded to zero are
+    /// rejected. The caller must provide matching text/value and measure the resulting text.
+    pub fn preview_geometry(
+        &self,
+        height_mm: f64,
+        reference_width_mm: f64,
+        format_number: impl Fn(f64) -> Result<(String, f64)>,
+    ) -> Result<SymbolGeometry> {
+        let texts = self.formatted_parameter_texts(format_number)?;
         let iso = matches!(self.specification, Specification::Iso21920_1_2021 { .. });
         let dimensions = proportions::resolve(iso, height_mm, texts.len())?;
         require(

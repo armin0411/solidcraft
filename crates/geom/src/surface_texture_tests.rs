@@ -1,6 +1,10 @@
 use super::*;
 use crate::paper::{Group, ObjectKind, Scene};
 
+fn diagnostic_number(n: f64) -> Result<(String, f64)> {
+    Ok((n.to_string(), n))
+}
+
 fn iso() -> Indication {
     Indication {
         specification: Specification::Iso21920_1_2021 {
@@ -39,7 +43,7 @@ fn outputs_reject(indication: &Indication) {
     assert!(indication.validate().is_err(), "{indication:?}");
     assert!(indication.text().is_err());
     assert!(indication.parameter_texts().is_err());
-    assert!(indication.preview_geometry(3.5, 30.0).is_err());
+    assert!(indication.preview_geometry(3.5, 30.0, diagnostic_number).is_err());
 }
 
 #[test]
@@ -183,7 +187,7 @@ fn empty_and_excessive_collections_are_rejected_before_geometry() {
     })
     .collect();
     indication.validate().unwrap();
-    let geometry = indication.preview_geometry(20.0, 1000.0).unwrap();
+    let geometry = indication.preview_geometry(20.0, 1000.0, diagnostic_number).unwrap();
     assert_eq!(geometry.parameters.len(), MAX_PARAMETER_LINES);
     assert!(geometry.parameters.windows(2).all(|p| (p[0].baseline_mm.y - p[1].baseline_mm.y - 30.0).abs() < 1e-9));
     assert!(geometry.parameters.last().unwrap().baseline_mm.y >= 0.0);
@@ -250,7 +254,7 @@ fn path(item: &Item) -> &[Seg2] {
 #[test]
 fn revised_preview_uses_nominal_iso_height_and_all_round_corner() {
     for (indication, short) in [(iso(), 7.0), (asme(AmplitudeUnit::Micrometre), 7.5)] {
-        let geometry = indication.preview_geometry(5.0, 30.0).unwrap();
+        let geometry = indication.preview_geometry(5.0, 30.0, diagnostic_number).unwrap();
         assert_eq!(path(&geometry.strokes[0])[0].start().y, short);
         let corner = path(&geometry.strokes[0])[1].end();
         assert!(matches!(path(&geometry.all_round_mark[0])[0], Seg2::Arc { center, .. } if center == corner));
@@ -262,7 +266,7 @@ fn preview_has_sixty_degree_legs_and_distinguishes_iso_bar_from_removal_bar() {
     let mut indication = iso();
     indication.lay = None;
     indication.kind = SymbolKind::AnyProcess;
-    let iso_geometry = indication.preview_geometry(3.5, 30.0).unwrap();
+    let iso_geometry = indication.preview_geometry(3.5, 30.0, diagnostic_number).unwrap();
     assert_eq!(iso_geometry.strokes.len(), 2);
     assert_eq!(path(&iso_geometry.strokes[0]).len(), 3);
     let (left, tip) = match path(&iso_geometry.strokes[0])[0] {
@@ -277,12 +281,12 @@ fn preview_has_sixty_degree_legs_and_distinguishes_iso_bar_from_removal_bar() {
     let cos = (left.x * right.x + left.y * right.y) / (left.len() * right.len());
     assert!((cos - 0.5).abs() < 1e-12);
     indication.kind = SymbolKind::RemovalRequired;
-    let required = indication.preview_geometry(3.5, 30.0).unwrap();
+    let required = indication.preview_geometry(3.5, 30.0, diagnostic_number).unwrap();
     assert_eq!(required.strokes.len(), 3);
     assert!(matches!(path(&required.strokes[1])[0], Seg2::Line { a, b } if a.y == 5.0 && a.y == b.y));
     indication.specification = asme(AmplitudeUnit::Micrometre).specification;
     indication.kind = SymbolKind::AnyProcess;
-    let asme_geometry = indication.preview_geometry(3.5, 30.0).unwrap();
+    let asme_geometry = indication.preview_geometry(3.5, 30.0, diagnostic_number).unwrap();
     assert_eq!(path(&asme_geometry.strokes[0])[0].start().y, 5.25);
     assert_eq!(path(&iso_geometry.strokes[0])[0].start().y, 5.0);
     assert_eq!(path(&asme_geometry.strokes[0])[1].end(), right);
@@ -293,7 +297,7 @@ fn preview_has_sixty_degree_legs_and_distinguishes_iso_bar_from_removal_bar() {
 #[test]
 fn prohibited_circle_is_tangent_to_both_legs_and_all_round_is_at_the_corner() {
     let indication = Indication { kind: SymbolKind::RemovalProhibited, lay: None, ..iso() };
-    let geometry = indication.preview_geometry(5.0, 30.0).unwrap();
+    let geometry = indication.preview_geometry(5.0, 30.0, diagnostic_number).unwrap();
     let (center, radius) = match path(geometry.strokes.last().unwrap())[0] {
         Seg2::Arc { center, radius, sweep, .. } => {
             assert_eq!(sweep, TAU);
@@ -306,7 +310,7 @@ fn prohibited_circle_is_tangent_to_both_legs_and_all_round_is_at_the_corner() {
     let corner = path(&geometry.strokes[0])[1].end();
     assert!(matches!(path(&geometry.all_round_mark[0])[0], Seg2::Arc { center, radius, .. } if center == corner && radius == 2.0));
     assert!(corner.dist(center) > 2.0 * radius);
-    let plain = Indication { all_round: false, ..indication }.preview_geometry(5.0, 30.0).unwrap();
+    let plain = Indication { all_round: false, ..indication }.preview_geometry(5.0, 30.0, diagnostic_number).unwrap();
     assert_eq!(plain.strokes, geometry.strokes);
     assert!(plain.all_round_mark.is_empty());
 }
@@ -328,7 +332,7 @@ fn all_symbol_and_lay_combinations_produce_valid_paper_strokes_at_nominal_sizes(
                 for specification in [iso().specification, asme(AmplitudeUnit::Microinch).specification] {
                     let indication = Indication { kind, lay, specification, ..iso() };
                     let before = indication.clone();
-                    let geometry = indication.preview_geometry(h, 1000.0).unwrap();
+                    let geometry = indication.preview_geometry(h, 1000.0, diagnostic_number).unwrap();
                     assert_eq!(indication, before);
                     assert_eq!(geometry.parameters[0].height_mm, h);
                     assert!(geometry.process.is_some());
@@ -350,20 +354,20 @@ fn all_symbol_and_lay_combinations_produce_valid_paper_strokes_at_nominal_sizes(
 #[test]
 fn geometry_rejects_nonfinite_and_unbounded_layout_requests() {
     for h in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 2.499, 20.001, f64::MAX] {
-        assert!(iso().preview_geometry(h, 30.0).is_err());
-        assert!(asme(AmplitudeUnit::Micrometre).preview_geometry(h, 30.0).is_err());
+        assert!(iso().preview_geometry(h, 30.0, diagnostic_number).is_err());
+        assert!(asme(AmplitudeUnit::Micrometre).preview_geometry(h, 30.0, diagnostic_number).is_err());
     }
     for width in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 3.499, 1000.001, f64::MAX] {
-        assert!(iso().preview_geometry(3.5, width).is_err());
-        assert!(asme(AmplitudeUnit::Microinch).preview_geometry(3.5, width).is_err());
+        assert!(iso().preview_geometry(3.5, width, diagnostic_number).is_err());
+        assert!(asme(AmplitudeUnit::Microinch).preview_geometry(3.5, width, diagnostic_number).is_err());
     }
 }
 
 #[test]
 fn preview_scales_in_paper_units_and_text_slots_preserve_the_original_content() {
     for (indication, h) in [(iso(), 5.0), (asme(AmplitudeUnit::Micrometre), 2.5)] {
-        let small = indication.preview_geometry(h, 25.0).unwrap();
-        let large = indication.preview_geometry(2.0 * h, 50.0).unwrap();
+        let small = indication.preview_geometry(h, 25.0, diagnostic_number).unwrap();
+        let large = indication.preview_geometry(2.0 * h, 50.0, diagnostic_number).unwrap();
         for (a, b) in small.strokes.iter().chain(&small.all_round_mark).zip(large.strokes.iter().chain(&large.all_round_mark)) {
             assert_eq!(path(a).len(), path(b).len());
             for (a, b) in path(a).iter().zip(path(b)) {
@@ -384,24 +388,24 @@ fn preview_scales_in_paper_units_and_text_slots_preserve_the_original_content() 
 #[test]
 fn iso_nominal_dimensions_use_rounding_and_asme_keeps_continuous_sizing() {
     for h in [2.75, 3.0, 3.5 + 1e-12, 4.0, 6.0, 8.0, 19.999] {
-        assert!(iso().preview_geometry(h, 30.0).is_err(), "ISO height {h}");
-        asme(AmplitudeUnit::Micrometre).preview_geometry(h, 30.0).unwrap();
+        assert!(iso().preview_geometry(h, 30.0, diagnostic_number).is_err(), "ISO height {h}");
+        asme(AmplitudeUnit::Micrometre).preview_geometry(h, 30.0, diagnostic_number).unwrap();
     }
     // Independently check representative nominal constructions, not a multiplier:
     // at 5mm, the short endpoint is 7mm, the identifier is 6mm long at y=10.5mm.
-    let geometry = Indication { lay: None, kind: SymbolKind::AnyProcess, ..iso() }.preview_geometry(5.0, 30.0).unwrap();
+    let geometry = Indication { lay: None, kind: SymbolKind::AnyProcess, ..iso() }.preview_geometry(5.0, 30.0, diagnostic_number).unwrap();
     assert_eq!(path(&geometry.strokes[0])[0].start().y, 7.0);
     assert_eq!(path(&geometry.strokes[0])[1].end().y, 15.0);
     assert!(matches!(path(&geometry.strokes[1])[0], Seg2::Line { a, b } if a == Vec2::new(-3.0, 10.5) && b == Vec2::new(3.0, 10.5)));
     assert!(matches!(geometry.strokes[0], Item::Stroke { width_mm, .. } if width_mm == 0.5));
     // The identifier gap rounds from 2mm to 3.5mm across these two sizes: it does
     // not double. Universal linear scaling would silently discard the nominal rule.
-    let small = Indication { lay: None, kind: SymbolKind::AnyProcess, ..iso() }.preview_geometry(2.5, 30.0).unwrap();
+    let small = Indication { lay: None, kind: SymbolKind::AnyProcess, ..iso() }.preview_geometry(2.5, 30.0, diagnostic_number).unwrap();
     let small_gap = path(&small.strokes[1])[0].start().y - path(&small.strokes[0])[0].start().y;
     let large_gap = path(&geometry.strokes[1])[0].start().y - path(&geometry.strokes[0])[0].start().y;
     assert_eq!(small_gap, 2.0);
     assert_eq!(large_gap, 3.5);
-    let largest = iso().preview_geometry(20.0, 30.0).unwrap();
+    let largest = iso().preview_geometry(20.0, 30.0, diagnostic_number).unwrap();
     assert_eq!(path(&largest.strokes[0])[0].start().y, 28.0);
 }
 
@@ -429,7 +433,8 @@ fn parameter_lines_and_lay_fit_inside_the_reference_bar_at_collection_limits() {
     for specification in [indication.specification.clone(), asme(AmplitudeUnit::Microinch).specification] {
         for lay in [None, Some(Lay::Circular), Some(Lay::Particulate)] {
             for h in [2.5, 20.0] {
-                let geometry = Indication { specification: specification.clone(), lay, ..indication.clone() }.preview_geometry(h, h).unwrap();
+                let geometry =
+                    Indication { specification: specification.clone(), lay, ..indication.clone() }.preview_geometry(h, h, diagnostic_number).unwrap();
                 let bar = path(&geometry.strokes[0])[2];
                 for run in &geometry.parameters {
                     assert!(run.baseline_mm.y >= 0.0 && run.baseline_mm.y + run.height_mm <= bar.start().y);
@@ -449,11 +454,58 @@ fn parameter_lines_and_lay_fit_inside_the_reference_bar_at_collection_limits() {
 
 #[test]
 fn iso_lay_is_above_the_shelf_with_process_while_asme_has_its_own_lower_lay_area() {
-    let iso = iso().preview_geometry(5.0, 30.0).unwrap();
-    let asme = asme(AmplitudeUnit::Micrometre).preview_geometry(5.0, 30.0).unwrap();
+    let iso = iso().preview_geometry(5.0, 30.0, diagnostic_number).unwrap();
+    let asme = asme(AmplitudeUnit::Micrometre).preview_geometry(5.0, 30.0, diagnostic_number).unwrap();
     let iso_lay = path(iso.strokes.last().unwrap())[0];
     let asme_lay = path(asme.strokes.last().unwrap())[0];
     assert_eq!(iso_lay.start().y, 20.0);
     assert_eq!(asme_lay.start().y, 7.5);
     assert_eq!(iso.process.unwrap().baseline_mm.y, 20.0);
+}
+
+#[test]
+fn preview_uses_caller_number_policy_for_all_limits() {
+    let format_comma = |n: f64| Ok((format!("{n:.2}").replace('.', ","), n));
+    let indication = iso();
+    let measured = indication.formatted_parameter_texts(format_comma).unwrap();
+    let geometry = indication.preview_geometry(3.5, 30.0, format_comma).unwrap();
+    assert_eq!(measured, ["Ra 1,60"]);
+    assert_eq!(geometry.parameters[0].text, measured[0]);
+    let geometry = asme(AmplitudeUnit::Microinch).preview_geometry(3.5, 30.0, format_comma).unwrap();
+    assert_eq!(geometry.parameters[0].text, "Ra 32,00-63,00");
+    let trim = |n: f64| Ok((format!("{n:.2}").trim_end_matches('0').trim_end_matches('.').to_owned(), n));
+    assert_eq!(iso().preview_geometry(3.5, 30.0, trim).unwrap().parameters[0].text, "Ra 1.6");
+}
+
+#[test]
+fn preview_refuses_zero_rounded_or_unbounded_limits_without_rejecting_record() {
+    let mut indication = iso();
+    iso_lines(&mut indication)[0].limit_um = f64::MIN_POSITIVE;
+    indication.validate().unwrap();
+    assert_eq!(indication.parameter_texts().unwrap()[0].len(), 329);
+    assert!(indication.preview_geometry(3.5, 30.0, diagnostic_number).is_err());
+    assert!(indication.preview_geometry(3.5, 30.0, |_| Ok(("0,00".into(), 0.0))).is_err());
+    assert!(indication.preview_geometry(3.5, 30.0, |_| Err(Invalid("formatter error"))).is_err());
+    assert!(indication.preview_geometry(3.5, 30.0, |n| Ok((format!("1\u{202e}{n}"), n))).is_err());
+    assert!(indication.preview_geometry(3.5, 30.0, |n| Ok((format!("1\u{2028}{n}"), n))).is_err());
+    // A caller can provide a compact representation only when its chosen policy allows it.
+    assert_eq!(indication.preview_geometry(3.5, 30.0, |n| Ok((format!("{n:e}"), n))).unwrap().parameters[0].text, "Ra 2.2250738585072014e-308");
+}
+
+#[test]
+fn plain_annotation_policy_rejects_invisible_controls_and_preserves_unicode() {
+    for text in ["x\u{200f}y", "x\u{feff}y", "x\u{202e}y", "x\ny"] {
+        assert!(!crate::plain_text::is_plain_line(text));
+        assert!(Indication { process: Some(text.into()), ..iso() }.validate().is_err());
+    }
+    for text in ["磨削 café", "polissage α", "溶接"] {
+        assert!(crate::plain_text::is_plain_line(text));
+        Indication { process: Some(text.into()), ..iso() }.validate().unwrap();
+    }
+}
+
+#[test]
+fn parameter_names_are_explicit_and_stable() {
+    assert_eq!(IsoParameter::Rmax.name(), "Rmax");
+    assert_eq!(AsmeParameter::Ra.name(), "Ra");
 }

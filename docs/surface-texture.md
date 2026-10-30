@@ -42,13 +42,29 @@ It is **not** the normative ASME textual notation or a parser input. ISO paramet
 fragments use single spaces, `L` for lower tolerance and `T16%`/`Tmed` when selected;
 maximum acceptance is explicit in data even when omitted from the fragment.
 
-`preview_geometry(h, reference_width_mm)` returns original `paper::Item` strokes and
+`preview_geometry(h, reference_width_mm, format_number)` returns original `paper::Item` strokes and
 separate text runs in local paper millimetres (x right, y up, tip at zero), with no
 view-scale input. There are no copied glyphs, fonts, artwork or new assets. ISO
 accepts only nominal text heights **2.5, 3.5, 5, 7, 10, 14 and 20 mm**. ASME accepts
 any finite height in **2.5..=20 mm**. Intermediate ISO sizes return an error; the
 rounded nominal dimensions are not interpolated or replaced by one multiplier.
 
+The caller formats every amplitude using the drawing's number policy, returning both text
+and its rounded numeric value. Map the drawing formatter's errors into `Invalid` and return
+its `Shown.text` and `Shown.value`; do not convert the explicitly stored amplitude unit.
+A positive value rounded to zero is refused: increase permitted precision or report that
+it cannot be represented under the selected policy. Formatted numeric fragments are capped
+at 128 UTF-8 bytes as a resource limit, not a standards limit. The record and diagnostic
+`text()` retain the original value. Scientific notation is not asserted to be standards
+compliant; its use on a drawing requires an independently established presentation policy.
+The existing drawing formatter is on a separate development line and its integration into
+sheet placement remains future work.
+
+The shared `plain_text::is_plain_line` checks characters; each annotation retains its own
+length and whitespace policy. The weld branch must adopt this helper separately.
+
+`formatted_parameter_texts(format_number)` returns the same validated fragments before
+geometry construction, so the caller can measure them and choose the reference width.
 The reference width comes from a future font measurer and must span the supplied
 text; character counts are not font metrics. Its finite bound is `[h, 1000]` mm.
 The bar reserves margins and room for a lay mark. Parameter lines retain their
