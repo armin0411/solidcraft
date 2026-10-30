@@ -51,8 +51,7 @@ The family and edition travel with each record; conversion is never automatic.
   the plan's instruction not to reject all datum-free position specifications.
 - Datum identifiers are one or two uppercase ASCII letters excluding I, O and Q.
   This is a conservative supported alphabet, not a claim that ISO excludes all
-  three letters: the study's ISO 5459:2024 preview found no exclusion, whereas
-  its proposed command excludes them. Ordered references cannot repeat an
+  three letters. Ordered references cannot repeat an
   identifier. Common/multiple-feature datums
   such as A-B require a future structured grammar and are rejected here.
 
@@ -90,13 +89,13 @@ max(2h/10,0.7 mm). Padding additionally allows for the frame's half stroke width
 and the lettering's worst permitted miter extension, so the clearance applies to
 visible ink rather than centre lines.
 A single-letter datum label is square. Bounds describe stroke centre lines;
-painted ink extends h/20 outside the outer frame. The public [SIST preview of ISO 7083:2021](https://preview.sist.si/sist-preview/66740/2848daeb646f4ca9b325c29dd16e96b1/ISO-7083-2021.pdf),
-Table 2 and clause 5, independently confirms the Type B frame/nominal-height/line-width
-ratios, square first compartment and horizontal clearance used here. This does not
-verify the painted height or construction of the original alphabet. The custom
-1.8 mm height is a supported layout policy, outside that table's recommended sizes.
+painted ink extends h/20 outside the outer frame. The frame/nominal-height/line-width
+ratios, square first compartment and horizontal clearance were checked in part
+against ISO 7083:2021. This does not verify the painted height or construction of
+the original alphabet. The custom 1.8 mm height is a supported layout policy,
+outside the recommended sizes used for this frame layout.
 
-For the ISO diameter prefix, Table 6 no. 32 supplies the construction grid. With
+The ISO diameter prefix was also checked in part against ISO 7083:2021. With
 d=h/10, the circle's centre-line diameter is 6d and the diagonal spans 3d
 horizontally and 9d vertically. Analytic filled circles of radius d/2 give its
 round ends without changing paper's butt-cap stroke contract. Its painted width
@@ -104,22 +103,22 @@ is 7d and height is 10d. These are mathematical proportions used in original cod
 no standard artwork is extracted or shipped. The ASME diameter construction stays
 separate and provisional pending review, rather than inheriting ISO proportions.
 At h=3.5 mm, the example `⌀0.1Ⓜ` compartment is 17.5 mm wide under ISO and 18.2 mm
-in the ASME preview; the five-cell ISO example is 40.25 × 7 mm.
+in the provisional ASME layout; the five-cell ISO example is 40.25 × 7 mm.
 
 ## Provisional proportions and replacement points
 
 Unverified details are intentional temporary approximations, not completed
 standards work. They retain recognizable characteristic forms, consistent stroke
-weight and bounded geometry. They are original code; no FreeCAD or commercial CAD
-source, glyph or artwork is used as a construction reference.
+weight and bounded geometry. They are original code; no standard artwork, fonts
+or CAD assets were copied.
 
-| Detail requiring review/correction | Source adjustment point | Evidence still needed |
+| Detail requiring review/correction | Adjustment point | Verification still needed |
 | --- | --- | --- |
 | All fourteen characteristic constructions (twelve under ASME) | `crates/geom/src/gdt/geometry/provisional.rs`, `Pen::characteristic`, one named match arm per characteristic | Current ISO 7083 characteristic grids; ASME Y14.5 construction requirements |
 | Circled M/L/P dimensions and placement | Same module, `MODIFIER_*` constants | Family-specific circle, internal-letter and spacing proportions |
 | ASME diameter prefix | Same module, `ASME_DIAMETER_*` constants | ASME Y14.5/Y14.2 construction requirements |
 | Original alphabet, decimal mark, widths and inter-character advance | Same module, `Pen::letter`, `LETTER_WIDTH_H`, `DECIMAL_WIDTH_H`, `CHARACTER_GAP_H` | ISO 3098 lettering construction/spacing and ASME Y14.2 requirements |
-| ASME frame/boxed-label proportions; current ISO boxed-label conventions | `crates/geom/src/gdt/geometry.rs`, `frame`, `datum`, `inset`, `Pen::stroke` | ASME Y14.5/Y14.2 technical pages; ISO 5459:2024 identifier and Annex F dimensions |
+| ASME frame/boxed-label proportions; current ISO boxed-label conventions | `crates/geom/src/gdt/geometry.rs`, `frame`, `datum`, `inset`, `Pen::stroke` | ASME Y14.5/Y14.2 and ISO 5459:2024 label dimensions |
 
 All construction coordinates and metrics in the provisional module are normalized
 to h. Change coordinates and their width/advance metrics together. Characteristic
@@ -131,21 +130,19 @@ new grammar.
 
 `geometry.rs` keeps the independently checked ISO diameter grid separate; do not
 replace it with the ASME approximation. Its frame ratios and clearance have the
-public ISO 7083 evidence described above, while reuse for ASME remains provisional.
+ISO 7083 checks described above, while reuse for ASME remains provisional.
 The current ISO 5459 datum indicator's connecting line and triangle remain deferred;
 the boxed label alone is not a complete datum feature indicator.
 
-Available ISO 3098 references do not make the original alphabet compliant. In
-particular, the current alphabet uses h as its centre-line height and a 0.2h
+The original alphabet has not been verified against ISO 3098. In particular,
+the current alphabet uses h as its centre-line height and a 0.2h
 centre-line gap. ISO 3098-1 distinguishes painted height/spacing from centre-line
 height/spacing (h1=h-d, a1=a+d). Alphabet geometry and advances therefore need
 correction or verification together; the current preview must not be presented as
-verified Type B lettering. The 1.8 mm height is included in ISO 3098-1's Type B size
-table, despite being outside the ISO 7083 preview's recommended height list.
-ISO 1101:2017 Annex F concerns additional indicators, not a complete construction
-grid for the basic fourteen characteristics.
+verified Type B lettering. The 1.8 mm height is included among ISO 3098-1's Type B
+sizes, despite being outside the recommended heights used for this frame layout.
 
-ISO 2692:2021 Annex D supports material requirements on derived linear features of
+ISO 2692:2021 supports material requirements on derived linear features of
 size, including coaxiality/symmetry cases beyond this implementation's conservative
 subset. Existing restrictions deliberately remain narrower; actual datum/feature
 eligibility, material evaluation and degrees of freedom need model context.
@@ -156,22 +153,11 @@ CI. A green test suite by itself cannot certify the new proportions. Drafting
 review remains outstanding before claiming graphical standards conformity or
 manufacturing completeness.
 
-## Evidence and boundaries
+## Boundaries
 
-Requirements: [issue #7257](https://github.com/tangency-labs/solidcraft/issues/7257),
-[drawings study](https://github.com/tangency-labs/solidcraft/issues/860#issuecomment-6216908058)
-§5.4.0, §5.4.3–4, §11.1, §11.8–9 and §11.26–28, and
-[plan W28](https://github.com/tangency-labs/solidcraft/issues/860#issuecomment-6234779815).
-The issue narrows the larger W28 row to this below-UI foundation.
-
-Publisher scope/edition references:
-[ISO 1101:2017](https://www.iso.org/standard/66777.html),
-[ISO 5459:2024](https://www.iso.org/standard/87855.html),
-[ISO 7083:2021](https://www.iso.org/standard/66740.html) and
-[ASME Y14.5-2018 (R2024)](https://www.asme.org/codes-standards/find-codes-standards/y14-5-dimensioning-tolerancing).
-These public catalogue descriptions confirm editions and subject, not every
-syntax or numeric proportion. The study supplies the working rule evidence;
-unverified details remain explicitly limited above.
+Issue #7257 defines this below-UI foundation. ISO 1101:2017, ISO 5459:2024,
+ISO 7083:2021 and ASME Y14.5-2018 (R2024) remain distinct; the provisional
+details above are not a complete verification against any of them.
 
 No sheet placement, leader, view/dimension attachment, datum target, composite or
 stacked frame, model evaluation, document persistence or UI/engine command is

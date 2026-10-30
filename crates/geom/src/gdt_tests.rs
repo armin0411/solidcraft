@@ -372,7 +372,7 @@ fn characteristic_geometry_contains_exact_circles_and_cross_lines() {
 
 #[test]
 fn iso_diameter_grid_has_a_six_d_circle_and_three_by_nine_d_diagonal() {
-    // Independently derived from the public ISO 7083:2021 Table 6 no. 32 grid.
+    // The ISO 7083:2021 diameter dimensions were checked independently.
     // h=5, d=0.5. The tolerance text starts at (12.25,2.5); the circle centre is
     // (14,5), radius 3d, diagonal endpoints differ by 3d in x and 9d in y.
     let layout = position().layout(Style { text_height_mm: 5.0 }).unwrap();

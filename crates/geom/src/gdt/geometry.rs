@@ -152,7 +152,7 @@ impl Pen {
             let width = glyph_width(c, self.standard)?;
             match c {
                 '⌀' if self.standard == Standard::Iso1101_2017Iso5459_2024 => {
-                    // ISO 7083:2021 Table 6, no. 32: d=h/10, centre-line circle
+                    // ISO 7083:2021: d=h/10, centre-line circle
                     // diameter 6d, diagonal 3d across/9d high, round ends of radius d/2.
                     self.arc(origin + Vec2::new(0.35, 0.5) * self.h, 0.3 * self.h, 0.0, TAU);
                     self.round_line(origin + Vec2::new(0.2, 0.05) * self.h, origin + Vec2::new(0.5, 0.95) * self.h);
