@@ -1,6 +1,6 @@
 //! `drawing.scene` (#4890 W10): one sheet of the open drawing as one paper scene, drawn at once
-//! ([`crate::drawing_scene::build`]): its drawing border, each image on it, then each view on it by id, then
-//! its title block. The sheet page draws the same scene through the provider, and the drawing export
+//! ([`crate::drawing_scene::build`]): its drawing border, each image on it, then each view on it by id,
+//! its dimensions and centre annotations, then its title block. The sheet page draws the same scene through the provider, and the drawing export
 //! (A7) writes it.
 //!
 //! `drawing.scene.hit` (#4816 E7b) says what is under a point of a sheet, by the one rule the sheet
@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&STATUS_CONTRACT)
     .output(output_schema_for::<DrawingStatusResult>)
-    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?, out_of_date?: true when its sheet shows it as it last was}], waiting: how many views are out of date, held?: true when a deferred drawing's views or dimensions out of date wait for drawing.update}. current: drawn, from the model and with the settings the view has now. A dimension's status is its reading from the model now; out_of_date says the sheet doesn't show that yet: its view is out of date, or it was read from another model or record than it has now (as drawing.scene's out_of_date lists it). Balloons aren't listed: drawing.balloon.inspect reads each one. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
+    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?, out_of_date?: true when its sheet shows it as it last was}], waiting: how many views are out of date, held?: true when a deferred drawing's views or dimensions out of date wait for drawing.update}. current: drawn, from the model and with the settings the view has now. A dimension's status is its reading from the model now; out_of_date says the sheet doesn't show that yet: its view is out of date, or it was read from another model or record than it has now (as drawing.scene's out_of_date lists it). Balloons, centre marks and centre lines are read by their inspect commands. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
     CommandSpec::new(UPDATE, "Update Drawing", crate::checked!("drawing.update", update))
     .icon("update")
     .in_drawing()
@@ -73,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<SheetSceneResult>)
-    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|dimension|title_block, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity} or {kind: text, font, scale, origin, angle, slant, glyphs, text, clusters, rtl}]}], fonts?: [the fonts its text names, by id, with their glyphs and never their bytes]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its hidden lines dashed, under its visible ones), then the dimensions of those views by view and id (object: the dimension; lines, arrowheads and text, set in the drawing's font and language, in paper millimetres at any scale), then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border, each view and each dimension sit on paper, dimensions: [{dimension, view, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, drawn, why?}]}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why, and so is a dimension that isn't found again or whose view isn't drawn; one whose text the drawing's font can't set keeps its lines and says why. Read-only; no model is evaluated. A deferred drawing draws only what drawing.update allows; out_of_date lists the views and dimensions it shows as they last were.")];
+    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|dimension|centre_mark|centre_line|title_block, items: [{kind: stroke, path, closed, width_mm, pattern?} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity} or {kind: text, font, scale, origin, angle, slant, glyphs, text, clusters, rtl}]}], fonts?: [the fonts its text names, by id, with their glyphs and never their bytes]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its hidden lines dashed, under its visible ones), then the dimensions of those views by view and id (object: the dimension; lines, arrowheads and text, set in the drawing's font and language, in paper millimetres at any scale), then manual centre marks and lines by id, then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border, each view, dimension and centre annotation sit on paper, dimensions: [{dimension, view, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, drawn, why?}]}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why, and so is a dimension that isn't found again or whose view isn't drawn; one whose text the drawing's font can't set keeps its lines and says why. annotation_failures lists omitted centre annotations with their object, view, kind and reason. Read-only; no model is evaluated. A deferred drawing draws only what drawing.update allows; out_of_date lists the views and dimensions it shows as they last were.")];
 
 fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let _: DrawingStatusParams = crate::schema::read(STATUS, p)?;
@@ -169,6 +169,7 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
         views,
         objects,
         dimensions,
+        annotation_failures: built.annotation_failures.into_iter().map(Into::into).collect(),
         out_of_date,
         param_warnings: Vec::new(),
     };
