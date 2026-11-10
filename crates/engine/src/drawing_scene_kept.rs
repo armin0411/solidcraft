@@ -9,7 +9,7 @@ use std::sync::Arc;
 use solidcraft_doc::drawing::dimension::Dimension;
 use solidcraft_doc::drawing::view::ResolvedView;
 
-use super::{Drawn, DrawnDimension, Lettering, SourceKey};
+use super::{Drawn, DrawnDimension, Lettering, Mark, SourceKey};
 
 /// Each closed drawing's last lines, by drawing.
 #[derive(Default)]
@@ -28,6 +28,8 @@ pub(super) struct KeptView {
     pub(super) view: ResolvedView,
     pub(super) drawn: Drawn,
     pub(super) shows: Option<Arc<SourceKey>>,
+    /// Centre annotations last shown with this view, in view-local paper coordinates.
+    pub(super) marks: Vec<Mark>,
 }
 
 /// A dimension's last reading: of `record`, on its view's drawing `view_serial`, with `lettering`.

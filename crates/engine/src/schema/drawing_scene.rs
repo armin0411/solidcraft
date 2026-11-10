@@ -24,8 +24,8 @@ pub struct SheetSceneParams {
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
-/// dimension's lines and arrowheads (object: the dimension), then the title block's (object: the
-/// sheet).
+/// dimension's lines and arrowheads (object: the dimension), manual centre marks and lines by id,
+/// then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -37,7 +37,15 @@ impl JsonSchema for SheetPaperScene {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         paper_scene_schema(
             generator,
-            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::TitleBlock],
+            &[
+                ObjectKind::DrawingBorder,
+                ObjectKind::SheetImage,
+                ObjectKind::View,
+                ObjectKind::Dimension,
+                ObjectKind::CentreMark,
+                ObjectKind::CentreLine,
+                ObjectKind::TitleBlock,
+            ],
             true,
         )
     }
@@ -72,6 +80,22 @@ pub struct SheetSceneDimension {
     pub drawn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
+}
+
+/// A centre annotation omitted from the scene and why.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetAnnotationFailure {
+    pub object: String,
+    pub view: String,
+    #[schemars(with = "String")]
+    pub kind: ObjectKind,
+    pub reason: String,
+}
+
+impl From<crate::drawing_scene::AnnotationFailure> for SheetAnnotationFailure {
+    fn from(failure: crate::drawing_scene::AnnotationFailure) -> Self {
+        Self { object: ids::encode(failure.object), view: ids::encode(failure.view), kind: failure.kind, reason: failure.reason }
+    }
 }
 
 /// Where one object of the scene sits on paper: the box round what it draws, along its lines' paths
@@ -236,10 +260,13 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
-    /// The sheet's border, then each view on it, then each dimension drawn, in paint order.
+    /// The sheet's border, views, dimensions and centre annotations, in paint order.
     pub objects: Vec<SheetObjectResult>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<SheetSceneDimension>,
+    /// Centre annotations omitted and why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotation_failures: Vec<SheetAnnotationFailure>,
     /// The views and dimensions a deferred drawing shows as they last were, and the dimensions a view
     /// drawing an exploded view holds back.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
