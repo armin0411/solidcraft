@@ -710,6 +710,9 @@ fn check_exploded(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> R
         {
             return Err(bad(cmd, "not supported yet: an exploded view with centre annotations"));
         }
+        if crate::drawing_view::draws_exploded(d, view) && d.view(view).is_some_and(|record| record.centre_marks.is_some()) {
+            return Err(bad(cmd, "not supported yet: an exploded view with automatic centre marks enabled"));
+        }
     }
     Ok(())
 }
@@ -922,7 +925,8 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };
-    let mut view = View { id, sheet, kind, place, settings, reference_shown_percent: request.reference_shown_percent.unwrap_or(0.0) };
+    let mut view =
+        View { id, sheet, kind, place, settings, reference_shown_percent: request.reference_shown_percent.unwrap_or(0.0), centre_marks: None };
     // The record's rules first, at 1:1 unless a scale is given, so a bad direction, percent or place
     // is refused as the record says; then what it shows; then the fitted scale, which is saved. With
     // nothing to measure, 1:1.
@@ -969,7 +973,7 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         None => ViewPlace::Aligned(side.along(parent_centre)),
     };
     let kind = ViewKind::Projected { parent, side };
-    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0 };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, centre_marks: None };
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved along the free axis until its
         // boundary is the gap past its parent's.
